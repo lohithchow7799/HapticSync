@@ -11,7 +11,6 @@ import kotlinx.serialization.Serializable
  * @property showVisualization show the live audio visualisation during playback.
  * @property keepScreenOn keep the display awake while a video is playing.
  * @property autoHideControlsMs delay before player controls hide during playback.
- * @property semanticClassifierEnabled use the optional on-device model when one is installed.
  */
 @Serializable
 data class AppSettings(
@@ -20,7 +19,6 @@ data class AppSettings(
     val showVisualization: Boolean = true,
     val keepScreenOn: Boolean = true,
     val autoHideControlsMs: Long = 3500L,
-    val semanticClassifierEnabled: Boolean = false,
 )
 
 /** An entry in the "Recently played" list. */

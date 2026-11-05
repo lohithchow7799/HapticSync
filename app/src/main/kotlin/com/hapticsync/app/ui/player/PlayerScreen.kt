@@ -191,7 +191,15 @@ fun PlayerScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenStudio: (
                 }
             }
         } else {
-            Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            // The sync test adds a tall panel: let the page scroll then (it has no weighted children).
+            val syncTest = request?.syncTest == true
+            val pageScroll = rememberScrollState()
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .then(if (syncTest) Modifier.verticalScroll(pageScroll) else Modifier),
+            ) {
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -227,7 +235,7 @@ fun PlayerScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenStudio: (
                         profile.isolation.target.label, onIsolation = { showIsolation = true }, onOpenStudio = onOpenStudio)
                 }
                 Banners(state, status.unsupportedReason, viewModel.capabilities.hasVibrator, Modifier.padding(horizontal = 18.dp))
-                if (settings.showVisualization && !audioOnly) {
+                if (settings.showVisualization && !audioOnly && !syncTest) {
                     Surface(
                         Modifier.fillMaxWidth().weight(1f).padding(horizontal = 18.dp, vertical = 8.dp),
                         shape = RoundedCornerShape(22.dp),
@@ -235,10 +243,10 @@ fun PlayerScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenStudio: (
                     ) {
                         Box(Modifier.padding(14.dp)) { LiveVisualizer(viewModel.engine, onDominantCategory = { dominantCategory = it }) }
                     }
-                } else {
+                } else if (!syncTest) {
                     Spacer(Modifier.weight(1f))
                 }
-                if (request?.syncTest == true) SyncTestPanel(viewModel, Modifier.navigationBarsPadding())
+                if (syncTest) SyncTestPanel(viewModel)
                 Spacer(Modifier.navigationBarsPadding())
             }
         }

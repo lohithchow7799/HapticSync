@@ -2,6 +2,8 @@ package com.hapticsync.app.ui.components
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -35,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -79,13 +82,17 @@ fun ScreenScaffold(
     )
 }
 
-/** Content padding for a scrolling screen body inside [ScreenScaffold]. */
-fun PaddingValues.screenContent(horizontal: Dp = 16.dp, extraBottom: Dp = 24.dp): PaddingValues = PaddingValues(
-    start = horizontal,
-    end = horizontal,
-    top = calculateTopPadding() + 4.dp,
-    bottom = calculateBottomPadding() + extraBottom,
-)
+/** Content padding for a scrolling screen body inside [ScreenScaffold] (keeps side insets in landscape). */
+@Composable
+fun PaddingValues.screenContent(horizontal: Dp = 16.dp, extraBottom: Dp = 24.dp): PaddingValues {
+    val direction = LocalLayoutDirection.current
+    return PaddingValues(
+        start = calculateStartPadding(direction) + horizontal,
+        end = calculateEndPadding(direction) + horizontal,
+        top = calculateTopPadding() + 4.dp,
+        bottom = calculateBottomPadding() + extraBottom,
+    )
+}
 
 /** Compact bar for returning to (and pausing) the open video from other screens. */
 @Composable

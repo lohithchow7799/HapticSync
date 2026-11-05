@@ -85,7 +85,7 @@ class PlayerViewModel(
         lastRecordedUri = null
         saveRequest(request)
         player.setRepeat(request.repeat)
-        player.setItems(request.items, request.startIndex, request.startPositionMs)
+        player.setItems(request.items, request.startIndex, request.startPositionMs, playWhenReady = request.autoPlay)
     }
 
     private fun trackRecents(savePosition: Boolean) {
@@ -150,6 +150,8 @@ class PlayerViewModel(
             audioOnly = flags.getOrElse(1) { false },
             recordInRecents = flags.getOrElse(2) { true },
             repeat = flags.getOrElse(3) { false },
+            // The app was killed in the background: come back paused at the same spot.
+            autoPlay = false,
         )
     }
 

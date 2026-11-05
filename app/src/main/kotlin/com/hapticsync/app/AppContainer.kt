@@ -37,6 +37,8 @@ data class PlaybackRequest(
     val recordInRecents: Boolean = true,
     /** Loop the current item (used by the synchronisation test). */
     val repeat: Boolean = false,
+    /** Start playing as soon as the media is ready (false when restoring after process death). */
+    val autoPlay: Boolean = true,
 )
 
 /** Hand-off of the next playback request from any screen to the player screen. */

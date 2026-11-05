@@ -61,13 +61,19 @@ jobs:
           2>&1 | tee "$RUNNER_TEMP/gradle.log"
 
       - name: Verify the app requests only the vibration permission
+        shell: bash
         run: |
-          manifest=$(find app/build/intermediates -name AndroidManifest.xml -path '*merged_manifest*' -path '*release*' | head -1)
+          set -euo pipefail
+          manifest=$(find app/build/intermediates -name AndroidManifest.xml -path '*merged_manifest*' -path '*release*' -print -quit)
+          if [ -z "$manifest" ]; then
+            echo "::error::Merged release manifest not found."
+            exit 1
+          fi
           echo "Merged manifest: $manifest"
-          tr '\n' ' ' < "$manifest" | grep -o '<uses-permission[^>]*>' | grep -o 'android:name="[^"]*"' \
+          tr '\n' ' ' < "$manifest" | { grep -o '<uses-permission[^>]*>' || true; } | { grep -o 'android:name="[^"]*"' || true; } \
             | sed 's/android:name="//; s/"$//' | sort -u | tee "$RUNNER_TEMP/permissions.txt"
-          if grep -v '^android.permission.VIBRATE$' "$RUNNER_TEMP/permissions.txt"; then
-            echo "::error::Unexpected permissions in the merged manifest (listed above)."
+          if [ "$(cat "$RUNNER_TEMP/permissions.txt")" != "android.permission.VIBRATE" ]; then
+            echo "::error::The merged manifest must request exactly android.permission.VIBRATE (found the list above)."
             exit 1
           fi
 

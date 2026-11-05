@@ -306,8 +306,12 @@ usage class in Calibration.
   behave like an engine, a kick drum or an explosion. Spectral analysis alone cannot know what
   produced a sound, so similar sounds can be confused (a slammed door and a punch, for
   example). The engine exposes a `SemanticClassifier` hook through which an on-device audio
-  model (e.g. a YAMNet-style AudioSet classifier) can nudge these decisions. No model is
-  bundled, and the app works fully without one.
+  model (e.g. a YAMNet-style AudioSet classifier run with LiteRT/TensorFlow Lite) can nudge
+  these decisions; `SemanticLabelMap` already maps AudioSet labels to HapticSync categories.
+  No ML runtime or model is bundled: the app ships no native code (so it meets Google Play's
+  16 KB page-size requirement without extra work) and works fully without one. To add one,
+  implement `SemanticClassifier` and assign it to `HapticSyncEngine.semanticClassifier`; the
+  engine runs it off the audio threads about twice per second.
 - **A vibration motor is not a speaker.** Phone actuators resonate around 150–250 Hz and cannot
   reproduce audio frequencies. HapticSync maps the energy and dynamics of each band onto
   patterns the motor can play.
