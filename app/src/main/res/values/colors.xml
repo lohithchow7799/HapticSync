@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="hs_window_background">#FF07080B</color>
+    <color name="ic_launcher_background">#FF0C0E13</color>
+    <color name="ic_launcher_accent">#FFFF6B35</color>
+    <color name="ic_launcher_secondary">#FF59D3C2</color>
+</resources>
