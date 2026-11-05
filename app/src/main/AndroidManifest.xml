@@ -1,10 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- The only permission HapticSync needs: driving the vibration motor. Videos are opened via
          the Photo Picker / Storage Access Framework, which grant per-file access without any
          storage permission. No microphone, playback-capture or accessibility access is used. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Merged in by libraries but not needed: Media3 only uses the network state for streaming
+         bandwidth estimates (it handles the missing permission), and AndroidX core's dynamic
+         receiver permission is unused by this app. CI verifies the merged manifest. -->
+    <uses-permission
+        android:name="android.permission.ACCESS_NETWORK_STATE"
+        tools:node="remove" />
+    <uses-permission
+        android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        tools:node="remove" />
+    <permission
+        android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        tools:node="remove" />
 
     <application
         android:name=".HapticSyncApplication"

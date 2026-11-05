@@ -205,7 +205,13 @@ fun PlayerScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenStudio: (
                         }
                     } else {
                         VideoSurface(viewModel, Modifier.fillMaxSize()) { controlsVisible = !controlsVisible; lastInteraction = System.nanoTime() }
-                        AnimatedVisibility(controlsVisible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.Center)) {
+                        // Qualified: inside this Column the scoped ColumnScope overload would be picked.
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = controlsVisible,
+                            modifier = Modifier.align(Alignment.Center),
+                            enter = fadeIn(),
+                            exit = fadeOut(),
+                        ) {
                             CenterControls(viewModel, state, Modifier, interact)
                         }
                     }

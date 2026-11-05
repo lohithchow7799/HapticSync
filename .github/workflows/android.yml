@@ -60,6 +60,17 @@ jobs:
           assembleDebug assembleRelease bundleRelease assembleDebugAndroidTest
           2>&1 | tee "$RUNNER_TEMP/gradle.log"
 
+      - name: Verify the app requests only the vibration permission
+        run: |
+          manifest=$(find app/build/intermediates -name AndroidManifest.xml -path '*merged_manifest*' -path '*release*' | head -1)
+          echo "Merged manifest: $manifest"
+          tr '\n' ' ' < "$manifest" | grep -o '<uses-permission[^>]*>' | grep -o 'android:name="[^"]*"' \
+            | sed 's/android:name="//; s/"$//' | sort -u | tee "$RUNNER_TEMP/permissions.txt"
+          if grep -v '^android.permission.VIBRATE$' "$RUNNER_TEMP/permissions.txt"; then
+            echo "::error::Unexpected permissions in the merged manifest (listed above)."
+            exit 1
+          fi
+
       - name: Summarize failures
         if: failure()
         run: |
