@@ -132,7 +132,19 @@ jobs:
           # Keep emulator audio enabled (the default options include -noaudio): the PCM tap test
           # plays real audio through Media3's AudioTrack sink.
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-back none
-          script: ./gradlew --stacktrace connectedDebugAndroidTest
+          script: ./gradlew --continue connectedDebugAndroidTest
+      - name: Summarize instrumented results
+        if: always()
+        run: |
+          # Result file names contain spaces (device names), so iterate NUL-delimited.
+          find . -path '*/build/outputs/androidTest-results/connected/*' -name 'TEST-*.xml' -print0 2>/dev/null |
+            while IFS= read -r -d '' f; do
+              echo "== $f"
+              grep -o '<testsuite [^>]*' "$f" | grep -o 'tests="[0-9]*"\|failures="[0-9]*"\|errors="[0-9]*"\|skipped="[0-9]*"' | tr '\n' ' ' || true
+              echo
+              grep -o '<testcase name="[^"]*" classname="[^"]*"' "$f" | sed 's/<testcase name="\([^"]*\)" classname="\([^"]*\)"/  \2.\1/' || true
+              grep -A6 '<failure' "$f" | head -40 || true
+            done
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v4

@@ -50,6 +50,8 @@ class NavigationSmokeTest {
         list.performScrollToNode(hasText("Sound categories"))
         list.performScrollToNode(hasText("Gear shifts"))
         back()
+        // Home keeps its scroll position, so bring the picker button back into view first.
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Choose video"))
         compose.onNodeWithText("Choose video").assertIsDisplayed()
     }
 
