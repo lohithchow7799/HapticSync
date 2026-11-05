@@ -30,6 +30,10 @@ class AndroidHapticOutput(context: Context) : HapticOutput {
     override val capabilities: DeviceCapabilities =
         VibrationCapabilityProbe.probe(context.applicationContext, vibrator)
 
+    /** Whether predefined effects are natively supported, for the capabilities report. */
+    val predefinedEffectSupport: String
+        get() = vibrator?.let { VibrationCapabilityProbe.predefinedSupport(it) } ?: "No vibrator"
+
     /** Usage class for subsequent effects. */
     @Volatile
     var usage: VibrationUsage = VibrationUsage.MEDIA

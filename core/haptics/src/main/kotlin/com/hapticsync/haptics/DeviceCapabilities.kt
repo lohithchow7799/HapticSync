@@ -49,15 +49,17 @@ data class DeviceCapabilities(
     val supportsEnvelopes: Boolean get() = apiLevel >= 36 && envelope != null
     val supportsFrequencyControl: Boolean get() = supportsEnvelopes && envelope?.frequencyRangeHz != null
 
-    /** Human-readable summary of the best rendering strategy available. */
-    val bestStrategy: RenderStrategy
-        get() = when {
-            !hasVibrator -> RenderStrategy.NONE
-            supportsFrequencyControl -> RenderStrategy.ENVELOPE
-            supportsComposition && hasAmplitudeControl -> RenderStrategy.PRIMITIVES_AND_WAVEFORM
-            hasAmplitudeControl -> RenderStrategy.AMPLITUDE_WAVEFORM
-            else -> RenderStrategy.ON_OFF
-        }
+    /** The best rendering strategy this device supports. */
+    val bestStrategy: RenderStrategy get() = strategyFor(preferEnvelopes = true, preferPrimitives = true)
+
+    /** The rendering strategy [HapticRenderer] uses with the given calibration preferences. */
+    fun strategyFor(preferEnvelopes: Boolean, preferPrimitives: Boolean): RenderStrategy = when {
+        !hasVibrator -> RenderStrategy.NONE
+        supportsFrequencyControl && preferEnvelopes -> RenderStrategy.ENVELOPE
+        supportsComposition && preferPrimitives && hasAmplitudeControl -> RenderStrategy.PRIMITIVES_AND_WAVEFORM
+        hasAmplitudeControl -> RenderStrategy.AMPLITUDE_WAVEFORM
+        else -> RenderStrategy.ON_OFF
+    }
 
     companion object {
         /** A capable modern phone (used by tests and previews). */

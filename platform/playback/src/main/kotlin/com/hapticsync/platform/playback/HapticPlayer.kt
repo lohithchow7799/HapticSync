@@ -159,6 +159,11 @@ class HapticPlayer(context: Context, audioInput: MediaAudioInput) {
 
     fun setSpeed(speed: Float) = exoPlayer.setPlaybackSpeed(speed.coerceIn(0.25f, 3f))
 
+    /** Loops the current item (used by the synchronisation test). */
+    fun setRepeat(enabled: Boolean) {
+        exoPlayer.repeatMode = if (enabled) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
+
     fun setVolume(volume: Float) {
         exoPlayer.volume = volume.coerceIn(0f, 1f)
     }

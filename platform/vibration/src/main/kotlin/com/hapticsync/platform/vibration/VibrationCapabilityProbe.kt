@@ -34,14 +34,12 @@ object VibrationCapabilityProbe {
         if (vibrator == null || !vibrator.hasVibrator()) {
             return DeviceCapabilities(hasVibrator = false, hasAmplitudeControl = false, apiLevel = api, vibratorCount = 0, deviceName = name)
         }
-        val primitives = if (api >= Build.VERSION_CODES.R) supportedPrimitives(vibrator) else emptySet()
-        val durations = if (api >= Build.VERSION_CODES.S) primitiveDurations(vibrator, primitives) else emptyMap()
-        val resonant = if (api >= Build.VERSION_CODES.S) vibrator.resonantFrequency.takeIf { it.isFinite() && it > 0f } else null
-        val q = if (api >= Build.VERSION_CODES.S) vibrator.qFactor.takeIf { it.isFinite() && it > 0f } else null
-        val count = if (api >= Build.VERSION_CODES.S) {
-            context.getSystemService(VibratorManager::class.java)?.vibratorIds?.size ?: 1
-        } else 1
-        val envelope = if (api >= 36) runCatching { envelopeCapability(vibrator) }.getOrNull() else null
+        val primitives = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) supportedPrimitives(vibrator) else emptySet()
+        val durations = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) primitiveDurations(vibrator, primitives) else emptyMap()
+        val resonant = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) resonantFrequency(vibrator) else null
+        val q = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) qFactor(vibrator) else null
+        val count = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) vibratorCount(context) else 1
+        val envelope = if (Build.VERSION.SDK_INT >= 36) runCatching { envelopeCapability(vibrator) }.getOrNull() else null
         return DeviceCapabilities(
             hasVibrator = true,
             hasAmplitudeControl = vibrator.hasAmplitudeControl(),
@@ -56,6 +54,16 @@ object VibrationCapabilityProbe {
             deviceName = name,
         )
     }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private fun resonantFrequency(vibrator: Vibrator): Float? = vibrator.resonantFrequency.takeIf { it.isFinite() && it > 0f }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private fun qFactor(vibrator: Vibrator): Float? = vibrator.qFactor.takeIf { it.isFinite() && it > 0f }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun vibratorCount(context: Context): Int =
+        context.getSystemService(VibratorManager::class.java)?.vibratorIds?.size?.takeIf { it > 0 } ?: 1
 
     @RequiresApi(Build.VERSION_CODES.R)
     private fun supportedPrimitives(vibrator: Vibrator): Set<HapticPrimitive> {

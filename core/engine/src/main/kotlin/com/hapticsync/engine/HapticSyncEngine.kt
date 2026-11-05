@@ -20,6 +20,7 @@ import com.hapticsync.model.SoundCategory
 import java.nio.ByteBuffer
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.LockSupport
@@ -164,9 +165,14 @@ class HapticSyncEngine(
         analysisThread = null
         schedulerThread = null
         scheduler.playbackStopped()
-        semanticExecutor?.shutdownNow()
+        semanticExecutor?.let { executor ->
+            executor.shutdownNow()
+            // Let a running inference finish before the model is released.
+            runCatching { executor.awaitTermination(SEMANTIC_SHUTDOWN_MS, TimeUnit.MILLISECONDS) }
+        }
         semanticExecutor = null
-        semanticClassifier?.let { runCatching { it.close() } }
+        // Releases the model; its owner installs a fresh one before the next start().
+        semanticClassifier = null
     }
 
     // ==========================================================================================
@@ -524,6 +530,7 @@ class HapticSyncEngine(
         private const val SEMANTIC_INTERVAL_US = 480_000L
         private const val SEMANTIC_MIN_LEVEL_DB = -45f
         private const val SEMANTIC_STALE_HOPS = 300
+        private const val SEMANTIC_SHUTDOWN_MS = 300L
 
         val DEFAULT_THREAD_FACTORY = EngineThreadFactory { name, realtime, body ->
             Thread(body, name).apply {
