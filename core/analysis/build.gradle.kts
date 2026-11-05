@@ -23,6 +23,7 @@ dependencies {
 }
 
 tasks.test {
+    systemProperty("diag.detail", System.getProperty("diag.detail", ""))
     testLogging {
         events("failed", "skipped")
         exceptionFormat = TestExceptionFormat.FULL
