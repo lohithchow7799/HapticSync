@@ -27,7 +27,7 @@ internal object EnvelopeEffectsApi36 {
     fun limits(vibrator: Vibrator): Limits {
         val info = vibrator.envelopeEffectInfo
         return Limits(
-            maxControlPoints = info.maxControlPointCount,
+            maxControlPoints = info.maxSize,
             minControlPointDurationMs = info.minControlPointDurationMillis,
             maxControlPointDurationMs = info.maxControlPointDurationMillis,
             maxDurationMs = info.maxDurationMillis,
