@@ -47,6 +47,10 @@ class TransientEffect(
     val epoch: Int,
 ) {
     val durationUs: Long get() = (curve.durationMs * 1000f).toLong()
+
+    /** Media time at which the effect was queued (set by the submitter; for look-ahead statistics). */
+    @Volatile
+    var queuedAtMediaUs: Long = Long.MIN_VALUE
 }
 
 /** One sample of the continuous haptic plan (one analysis hop). */

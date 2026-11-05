@@ -174,7 +174,8 @@ class HapticScheduler(
                         lastTransientFireUs = now
                         lastTransientPriority = effect.priority
                         continuousUntilUs = NONE
-                        stats.recordDispatch(now - fireAt, effect.timeUs - now)
+                        val queuedAt = effect.queuedAtMediaUs
+                        stats.recordDispatch(now - fireAt, if (queuedAt == Long.MIN_VALUE) 0L else fireAt - queuedAt)
                         history.add(effect.timeUs, mediaDurationUs, rendered.peakAmplitude, true, effect.category.ordinal)
                     }
                 }
