@@ -129,6 +129,9 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
+          # Keep emulator audio enabled (the default options include -noaudio): the PCM tap test
+          # plays real audio through Media3's AudioTrack sink.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-back none
           script: ./gradlew --stacktrace connectedDebugAndroidTest
       - name: Upload instrumented test reports
         if: always()
