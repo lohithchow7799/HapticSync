@@ -47,21 +47,25 @@ jobs:
             echo "No release keystore secret; the release build will be signed with the debug key."
           fi
 
-      - name: Engine tests (pure JVM)
-        run: ./gradlew --stacktrace coreTest
-
-      - name: Android unit tests
-        run: ./gradlew --stacktrace testDebugUnitTest
-
-      - name: Lint
-        run: ./gradlew --stacktrace lintDebug
-
-      - name: Build APKs and App Bundle
+      - name: Build, test and lint (engine JVM tests, Android unit tests, lint, APKs, bundle)
         env:
           HAPTICSYNC_KEYSTORE_PASSWORD: ${{ secrets.HAPTICSYNC_KEYSTORE_PASSWORD }}
           HAPTICSYNC_KEY_ALIAS: ${{ secrets.HAPTICSYNC_KEY_ALIAS }}
           HAPTICSYNC_KEY_PASSWORD: ${{ secrets.HAPTICSYNC_KEY_PASSWORD }}
-        run: ./gradlew --stacktrace assembleDebug assembleRelease bundleRelease assembleDebugAndroidTest
+        run: >-
+          ./gradlew --continue
+          coreTest testDebugUnitTest lintDebug
+          assembleDebug assembleRelease bundleRelease assembleDebugAndroidTest
+          2>&1 | tee "$RUNNER_TEMP/gradle.log"
+
+      - name: Summarize failures
+        if: failure()
+        run: |
+          echo "::group::Compiler, test and lint errors"
+          grep -E '^e: |^w: .*(deprecat|unchecked)|What went wrong|FAILED$|Lint found|Error: ' "$RUNNER_TEMP/gradle.log" | sort -u | head -250 || true
+          for f in $(find . -path '*/build/reports/lint-results-*.txt' 2>/dev/null); do echo "== $f"; head -150 "$f"; done
+          for f in $(find . -path '*/build/test-results/*' -name '*.xml' 2>/dev/null); do grep -l '<failure' "$f" >/dev/null 2>&1 && { echo "== $f"; grep -A8 '<failure' "$f" | head -60; }; done
+          echo "::endgroup::"
 
       - name: Upload APKs and bundle
         uses: actions/upload-artifact@v4
