@@ -52,6 +52,8 @@ jobs:
           HAPTICSYNC_KEYSTORE_PASSWORD: ${{ secrets.HAPTICSYNC_KEYSTORE_PASSWORD }}
           HAPTICSYNC_KEY_ALIAS: ${{ secrets.HAPTICSYNC_KEY_ALIAS }}
           HAPTICSYNC_KEY_PASSWORD: ${{ secrets.HAPTICSYNC_KEY_PASSWORD }}
+        # Explicit bash enables `-o pipefail`, so a Gradle failure is not masked by `tee`.
+        shell: bash
         run: >-
           ./gradlew --continue
           coreTest testDebugUnitTest lintDebug
