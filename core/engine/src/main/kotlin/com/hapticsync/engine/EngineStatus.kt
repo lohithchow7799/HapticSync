@@ -28,4 +28,6 @@ data class EngineStatus(
     val meanLeadMs: Float = 0f,
     /** Whether the semantic (ML) classifier is active. */
     val semanticActive: Boolean = false,
+    /** Whether haptics come from a prepared (pre-analysed) track instead of live analysis. */
+    val preparedHaptics: Boolean = false,
 )

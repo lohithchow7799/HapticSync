@@ -153,10 +153,12 @@ internal class EventLog(private val capacity: Int = 64) {
     private var count = 0
     private val lock = Any()
 
-    fun add(event: SoundEvent) = synchronized(lock) {
-        times[head] = event.timeUs
-        categories[head] = event.category.ordinal
-        strengths[head] = event.strength
+    fun add(event: SoundEvent) = add(event.timeUs, event.category.ordinal, event.strength)
+
+    fun add(timeUs: Long, category: Int, strength: Float) = synchronized(lock) {
+        times[head] = timeUs
+        categories[head] = category
+        strengths[head] = strength
         head = (head + 1) % capacity
         if (count < capacity) count++
     }

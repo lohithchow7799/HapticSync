@@ -53,6 +53,16 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenCalib
             item {
                 SectionCard("Player") {
                     SwitchRow(
+                        "Prepare haptics before playing",
+                        settings.prepareHaptics,
+                        { v -> viewModel.update { it.copy(prepareHaptics = v) } },
+                        description = if (settings.prepareHaptics) {
+                            "The soundtrack is analysed ahead of playback (a second or two before it starts), so vibrations land exactly with the sound and only clear sounds are felt"
+                        } else {
+                            "Haptics are generated live while playing; starts instantly but timing and selection are less exact"
+                        },
+                    )
+                    SwitchRow(
                         "Live visualisation",
                         settings.showVisualization,
                         { v -> viewModel.update { it.copy(showVisualization = v) } },

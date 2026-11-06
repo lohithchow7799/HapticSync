@@ -14,6 +14,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.hapticsync.engine.MediaAudioInput
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +47,10 @@ data class PlayerState(
     val error: String? = null,
     val hasNext: Boolean = false,
     val hasPrevious: Boolean = false,
+    /** Whether the player can seek in the current item (false for unindexed streams). */
+    val seekable: Boolean = true,
+    /** Container format of the current item (e.g. video/mp4), once known. */
+    val containerMimeType: String? = null,
 ) {
     val isBuffering: Boolean get() = playbackState == Player.STATE_BUFFERING
     val isEnded: Boolean get() = playbackState == Player.STATE_ENDED
@@ -65,6 +70,8 @@ data class PlayerState(
 class HapticPlayer(context: Context, audioInput: MediaAudioInput) {
 
     val exoPlayer: ExoPlayer = ExoPlayer.Builder(context, HapticRenderersFactory(context, audioInput))
+        // Seek indexing for files whose container has no index (otherwise seeks restart at 0).
+        .setMediaSourceFactory(DefaultMediaSourceFactory(context, SeekIndexingExtractorsFactory(context)))
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -101,6 +108,9 @@ class HapticPlayer(context: Context, audioInput: MediaAudioInput) {
                     hasVideo = tracks.containsType(C.TRACK_TYPE_VIDEO),
                     hasAudio = tracks.containsType(C.TRACK_TYPE_AUDIO),
                     audioSupported = !tracks.containsType(C.TRACK_TYPE_AUDIO) || tracks.isTypeSupported(C.TRACK_TYPE_AUDIO),
+                    containerMimeType = tracks.groups.firstNotNullOfOrNull { group ->
+                        (0 until group.length).firstNotNullOfOrNull { group.getTrackFormat(it).containerMimeType }
+                    },
                 )
             }
         }
@@ -188,6 +198,7 @@ class HapticPlayer(context: Context, audioInput: MediaAudioInput) {
                 volume = p.volume,
                 hasNext = p.hasNextMediaItem(),
                 hasPrevious = p.hasPreviousMediaItem(),
+                seekable = p.isCurrentMediaItemSeekable || p.playbackState == Player.STATE_IDLE,
             )
         }
     }

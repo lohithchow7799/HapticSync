@@ -95,20 +95,54 @@ class ModelTest {
         assertTrue(onlyRevs.isolationAllowsCategory(SoundCategory.ENGINE_REV))
         assertFalse(onlyRevs.isolationAllowsCategory(SoundCategory.EXPLOSION))
         assertFalse(onlyRevs.isolationAllowsCategory(SoundCategory.GEAR_SHIFT))
-        assertFalse(onlyRevs.isBandIsolation)
+        assertFalse(onlyRevs.hasBandIsolation)
 
         val impacts = base.copy(isolation = IsolationSettings(true, IsolationTarget.of(IsolationGroup.SUDDEN_IMPACTS)))
         assertTrue(impacts.isolationAllowsCategory(SoundCategory.GUNSHOT))
         assertFalse(impacts.isolationAllowsCategory(SoundCategory.ENGINE_IDLE))
 
         val lows = base.copy(isolation = IsolationSettings(true, IsolationTarget.of(IsolationGroup.LOW_FREQUENCY)))
-        assertTrue(lows.isBandIsolation)
-        assertFalse("band isolation bypasses categories", lows.isolationAllowsCategory(SoundCategory.BASS_DRUM))
-        assertEquals(setOf(BandId.SUB_BASS, BandId.BASS), lows.isolation.target.allowedBands())
+        assertTrue(lows.hasBandIsolation)
+        assertFalse("a band selection alone lets no category through", lows.isolationAllowsCategory(SoundCategory.BASS_DRUM))
+        assertEquals(setOf(BandId.SUB_BASS, BandId.BASS), lows.isolation.allowedBands)
 
         val invalid = IsolationSettings(true, IsolationTarget(IsolationType.CATEGORY, "NOPE")).validated()
-        assertTrue(invalid.target.isValid)
+        assertFalse("nothing valid selected: isolation is off", invalid.enabled)
+        assertTrue(invalid.targets.isEmpty())
         assertTrue(IsolationTarget.all().none { it.category == SoundCategory.DIALOGUE })
+    }
+
+    @Test
+    fun isolationCombinesAnyNumberOfSounds() {
+        val selection = IsolationSettings()
+            .toggled(IsolationTarget.of(SoundCategory.GEAR_SHIFT))
+            .toggled(IsolationTarget.of(SoundCategory.BASS_DRUM))
+            .toggled(IsolationTarget.of(IsolationGroup.SUDDEN_IMPACTS))
+            .toggled(IsolationTarget.of(BandId.SUB_BASS))
+        assertTrue("selecting turns isolation on", selection.isActive)
+        val profile = HapticProfile().copy(isolation = selection)
+        for (allowed in listOf(SoundCategory.GEAR_SHIFT, SoundCategory.BASS_DRUM, SoundCategory.EXPLOSION, SoundCategory.GUNSHOT)) {
+            assertTrue(allowed.name, profile.isolationAllowsCategory(allowed))
+        }
+        assertFalse(profile.isolationAllowsCategory(SoundCategory.ENGINE_IDLE))
+        assertTrue(profile.hasBandIsolation)
+        assertEquals(setOf(BandId.SUB_BASS), selection.allowedBands)
+        assertEquals("Gear shifts, Bass drums +2", selection.summary())
+
+        val fewer = selection.toggled(IsolationTarget.of(SoundCategory.BASS_DRUM))
+        assertFalse(HapticProfile().copy(isolation = fewer).isolationAllowsCategory(SoundCategory.BASS_DRUM))
+        val none = IsolationSettings(true, IsolationTarget.of(SoundCategory.GEAR_SHIFT)).toggled(IsolationTarget.of(SoundCategory.GEAR_SHIFT))
+        assertFalse("removing the last sound turns isolation off", none.isActive)
+    }
+
+    @Test
+    fun legacySingleTargetIsMigrated() {
+        val json = """{"bands":[],"categories":[],"isolation":{"enabled":true,"target":{"type":"CATEGORY","id":"GEAR_SHIFT"}}}"""
+        val profile = ModelJson.decodeProfile(json)!!.validated()
+        assertTrue(profile.isolation.isActive)
+        assertEquals(listOf(IsolationTarget.of(SoundCategory.GEAR_SHIFT)), profile.isolation.targets)
+        val again = ModelJson.decodeProfile(ModelJson.encodeProfile(profile))!!.validated()
+        assertEquals(profile.isolation, again.isolation)
     }
 
     @Test

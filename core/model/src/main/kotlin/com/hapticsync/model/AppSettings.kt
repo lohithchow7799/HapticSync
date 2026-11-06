@@ -11,6 +11,8 @@ import kotlinx.serialization.Serializable
  * @property showVisualization show the live audio visualisation during playback.
  * @property keepScreenOn keep the display awake while a video is playing.
  * @property autoHideControlsMs delay before player controls hide during playback.
+ * @property prepareHaptics analyse the soundtrack before (and ahead of) playback instead of live,
+ *   for exact timing and better judgement of which sounds deserve a vibration.
  */
 @Serializable
 data class AppSettings(
@@ -19,6 +21,7 @@ data class AppSettings(
     val showVisualization: Boolean = true,
     val keepScreenOn: Boolean = true,
     val autoHideControlsMs: Long = 3500L,
+    val prepareHaptics: Boolean = true,
 )
 
 /** An entry in the "Recently played" list. */

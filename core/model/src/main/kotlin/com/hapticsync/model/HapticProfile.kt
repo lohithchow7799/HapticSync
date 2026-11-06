@@ -31,18 +31,17 @@ data class HapticProfile(
         withCategory(transform(category(category)))
 
     /**
-     * Whether isolation mode lets [category] through. With isolation disabled every category is
-     * allowed (its own enabled flag still applies).
+     * Whether isolation mode lets [category] through. With isolation off every category is
+     * allowed (its own enabled flag still applies); with it on, only selected categories and
+     * the categories of selected groups are.
      */
     fun isolationAllowsCategory(category: SoundCategory): Boolean {
-        if (!isolation.enabled) return true
-        val target = isolation.target
-        if (target.isBandTarget) return false
-        return category in target.allowedCategories()
+        if (!isolation.isActive) return true
+        return category in isolation.allowedCategories
     }
 
-    /** Whether isolation mode is restricting output to frequency bands. */
-    val isBandIsolation: Boolean get() = isolation.enabled && isolation.target.isBandTarget
+    /** Whether isolation mode lets energy of selected frequency bands through. */
+    val hasBandIsolation: Boolean get() = isolation.isActive && isolation.allowedBands.isNotEmpty()
 
     /**
      * Returns a canonical copy: one entry per band and category in enum order, all values clamped

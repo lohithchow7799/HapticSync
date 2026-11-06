@@ -35,6 +35,8 @@ dependencies {
     api(project(":core:engine"))
     api(libs.media3.exoplayer)
     api(libs.media3.common)
+    implementation(libs.media3.extractor)
+    implementation(libs.media3.datasource)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

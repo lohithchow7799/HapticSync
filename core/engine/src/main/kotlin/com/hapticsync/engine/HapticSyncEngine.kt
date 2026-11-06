@@ -73,6 +73,11 @@ class HapticSyncEngine(
     private val scheduler = HapticScheduler(output, clock, renderer, hapticConfig, DEFAULT_HOP_US)
     private val visualization = VisualizationBuffer()
     private val eventLog = EventLog()
+    private val trackPlayer = TrackPlayer(output, renderer, scheduler.history, eventLog, hapticConfig) { scheduler.currentEpoch }
+
+    /** `sink time − media time` for the current stream, from the sink (or estimated). */
+    @Volatile private var sinkMinusMediaUs = TrackPlayer.UNKNOWN_OFFSET
+    @Volatile private var offsetFromSink = false
 
     // ---- analysis-thread state -------------------------------------------------------------
     private var analyzer: AudioAnalyzer? = null
@@ -126,13 +131,18 @@ class HapticSyncEngine(
     /** Master haptics switch. Analysis and visualisation continue when off. */
     var hapticsEnabled: Boolean
         get() = scheduler.enabled
-        set(value) { scheduler.enabled = value }
+        set(value) {
+            scheduler.enabled = value
+            if (!value) trackPlayer.stop()
+        }
 
     val profile: HapticProfile get() = currentProfile
     val calibration: CalibrationProfile get() = currentCalibration
     val capabilities get() = output.capabilities
 
     private val eventSink = SoundEventSink { event ->
+        // With a prepared track, haptics (and the event markers) come from the track.
+        if (trackPlayer.track != null) return@SoundEventSink
         eventLog.add(event)
         val effect = mapper?.mapEvent(event, analysisEpoch) ?: return@SoundEventSink
         if (clock.isValid) effect.queuedAtMediaUs = clock.mediaTimeUs(nanoTime())
@@ -191,6 +201,7 @@ class HapticSyncEngine(
 
     override fun onDiscontinuity() {
         scheduler.discontinuity()
+        trackPlayer.stop()
         clock.invalidate()
         analysisThread?.let { LockSupport.unpark(it) }
         schedulerThread?.let { LockSupport.unpark(it) }
@@ -198,7 +209,10 @@ class HapticSyncEngine(
 
     override fun onPlaying(playing: Boolean) {
         clock.setPlaying(playing, nanoTime())
-        if (!playing) scheduler.playbackStopped()
+        if (!playing) {
+            scheduler.playbackStopped()
+            trackPlayer.stop()
+        }
         schedulerThread?.let { LockSupport.unpark(it) }
     }
 
@@ -213,6 +227,9 @@ class HapticSyncEngine(
     override fun onReset() {
         clock.setPlaying(false, nanoTime())
         scheduler.discontinuity()
+        trackPlayer.stop()
+        sinkMinusMediaUs = TrackPlayer.UNKNOWN_OFFSET
+        offsetFromSink = false
         clock.invalidate()
         status = status.copy(analysing = false)
     }
@@ -220,13 +237,52 @@ class HapticSyncEngine(
     // ==========================================================================================
     // Control — any thread
 
+    override fun onMediaTimeOffset(sinkMinusMediaUs: Long) {
+        this.sinkMinusMediaUs = sinkMinusMediaUs
+        offsetFromSink = true
+        schedulerThread?.let { LockSupport.unpark(it) }
+    }
+
+    /**
+     * The player's own position (media time), sampled by the app. Only used to estimate the
+     * media-time mapping if the audio sink has not reported it.
+     */
+    fun onPlayerPosition(mediaPositionUs: Long, systemNanoTime: Long) {
+        if (offsetFromSink || !clock.isValid || !clock.isPlaying) return
+        val estimate = clock.mediaTimeUs(systemNanoTime) - mediaPositionUs
+        val current = sinkMinusMediaUs
+        sinkMinusMediaUs = if (current == TrackPlayer.UNKNOWN_OFFSET || abs(estimate - current) > 200_000L) estimate
+        else current + (estimate - current) / 8
+    }
+
+    /**
+     * Uses a prepared [track] for haptics (null: back to live analysis). With a track, the live
+     * analysis keeps feeding the visualisation, but vibration and event markers come from the
+     * track, rendered ahead of time and fired on the media clock.
+     */
+    fun setPreparedTrack(track: HapticTrack?) {
+        if (trackPlayer.track === track) return
+        trackPlayer.track = track
+        scheduler.clear()
+        eventLog.clear()
+        schedulerThread?.let { LockSupport.unpark(it) }
+    }
+
+    /** The prepared track in use, if any. */
+    val preparedTrack: HapticTrack? get() = trackPlayer.track
+
+    /** Statistics of prepared-track playback. */
+    val trackStats: TrackStats get() = trackPlayer.stats
+
     /** Applies a new profile (takes effect on the next analysis hop). */
     fun updateProfile(profile: HapticProfile) {
         currentProfile = profile.validated()
         hapticConfig = HapticConfig(currentProfile, currentCalibration)
         scheduler.config = hapticConfig
         mapper?.config = hapticConfig
+        trackPlayer.config = hapticConfig
         profileVersion++
+        schedulerThread?.let { LockSupport.unpark(it) }
     }
 
     /** Applies a new calibration (takes effect immediately). */
@@ -235,6 +291,8 @@ class HapticSyncEngine(
         hapticConfig = HapticConfig(currentProfile, currentCalibration)
         scheduler.config = hapticConfig
         mapper?.config = hapticConfig
+        trackPlayer.config = hapticConfig
+        schedulerThread?.let { LockSupport.unpark(it) }
     }
 
     /** Plays a calibration test pattern right now (independent of playback). */
@@ -359,7 +417,7 @@ class HapticSyncEngine(
             applySemanticPriors(a)
             val frame = a.process(hopMid, hopSide, 0, position.ptsUs)
             m.mapFrame(frame, analysisEpoch, planSample)
-            scheduler.submitPlan(planSample)
+            if (trackPlayer.track == null) scheduler.submitPlan(planSample)
             visualization.push(frame)
             feedSemantic(format.sampleRate, frame.rmsDb)
             lastHopEndPts = position.ptsUs + a.config.hopDurationUs.toLong()
@@ -427,6 +485,8 @@ class HapticSyncEngine(
         if (now - lastStatusNanos > STATUS_INTERVAL_NANOS) {
             lastStatusNanos = now
             val stats = scheduler.stats
+            val prepared = trackPlayer.track != null
+            val trackStats = trackPlayer.stats
             val lookaheadMs = if (clock.isValid) (lastFrontierUs - clock.mediaTimeUs(now)) / 1000f else 0f
             status = status.copy(
                 analysing = true,
@@ -434,12 +494,13 @@ class HapticSyncEngine(
                 loadLevel = loadLevel,
                 processingLoad = loadEwma,
                 droppedChunks = ingest.droppedChunks,
-                transientsDispatched = stats.transientsDispatched,
+                transientsDispatched = if (prepared) trackStats.transientsRendered else stats.transientsDispatched,
                 droppedStale = stats.droppedStale,
                 suppressed = stats.suppressedPriority + stats.suppressedSpacing,
-                meanDispatchErrorMs = (stats.meanDispatchErrorUs / 1000.0).toFloat(),
+                meanDispatchErrorMs = ((if (prepared) trackStats.meanHandoverErrorUs else stats.meanDispatchErrorUs) / 1000.0).toFloat(),
                 meanLeadMs = (stats.meanLeadUs / 1000.0).toFloat(),
                 semanticActive = semanticClassifier != null,
+                preparedHaptics = prepared,
             )
         }
     }
@@ -502,7 +563,7 @@ class HapticSyncEngine(
     internal fun processPending(): Boolean = processAvailable()
 
     /** Runs one scheduler step on the calling thread (deterministic tests). */
-    internal fun tickScheduler(systemNanoTime: Long): Long = scheduler.tick(systemNanoTime)
+    internal fun tickScheduler(systemNanoTime: Long): Long = tick(systemNanoTime)
 
     // ==========================================================================================
     // Scheduler thread
@@ -510,15 +571,24 @@ class HapticSyncEngine(
     private fun schedulerLoop() {
         while (running) {
             val waitNanos = try {
-                scheduler.tick(nanoTime())
+                tick(nanoTime())
             } catch (t: Throwable) {
                 scheduler.playbackStopped()
+                trackPlayer.stop()
                 IDLE_PARK_NANOS
             }
             LockSupport.parkNanos(this, waitNanos)
         }
         scheduler.playbackStopped()
+        trackPlayer.stop()
     }
+
+    private fun tick(nowNanos: Long): Long =
+        if (trackPlayer.track != null) {
+            trackPlayer.tick(nowNanos, clock, sinkMinusMediaUs, scheduler.currentEpoch, scheduler.enabled)
+        } else {
+            scheduler.tick(nowNanos)
+        }
 
     companion object {
         private const val DEFAULT_HOP_US = 10_000L

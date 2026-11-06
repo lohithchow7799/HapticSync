@@ -10,7 +10,6 @@ import com.hapticsync.model.CategorySettings
 import com.hapticsync.model.HapticParameters
 import com.hapticsync.model.HapticProfile
 import com.hapticsync.model.IsolationSettings
-import com.hapticsync.model.IsolationTarget
 import com.hapticsync.model.SoundCategory
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -50,8 +49,8 @@ class StudioViewModel(private val container: AppContainer) : ViewModel() {
     fun resetCategory(category: SoundCategory) = controller.updateProfile { it.withCategory(CategorySettings.defaultFor(category)) }
 
     /** Isolation is a listening mode, so toggling it does not turn the preset into "Custom". */
-    fun setIsolation(enabled: Boolean, target: IsolationTarget) =
-        controller.updateProfileInPlace { it.copy(isolation = IsolationSettings(enabled, target)) }
+    fun setIsolation(isolation: IsolationSettings) =
+        controller.updateProfileInPlace { it.copy(isolation = isolation.validated()) }
 
     /** Plays [category]'s haptic response with the current settings. */
     fun testCategory(category: SoundCategory): Boolean = container.engine.previewCategory(category)

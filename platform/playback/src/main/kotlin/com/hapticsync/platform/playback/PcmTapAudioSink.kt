@@ -53,16 +53,41 @@ class PcmTapAudioSink(
     // are never played, so they must not shift the timestamps of the following audio.
     private var pendingStartTrimFrames = 0
 
+    // Timeline bookkeeping. The sink plays a stream on its own timeline: after a configuration
+    // with an encoder delay, the first played frame sits at the first buffer's timestamp, so every
+    // frame plays `delay` earlier than its buffer timestamp suggests ([timelineTrimUs]). After a
+    // flush (seek) nothing is trimmed and buffer timestamps hold as they are. The media timeline
+    // of a prepared track always has the delay removed ([formatDelayUs]).
+    private var timelineTrimUs = 0L
+    private var formatDelayUs = 0L
+    private var outputStreamOffsetUs = C.TIME_UNSET
+
     override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
         val pcmFormat = toPcmFormat(inputFormat)
         format = pcmFormat
         bytesPerFrame = pcmFormat?.bytesPerFrame ?: 0
         trackedBuffer = null
+        val delayFrames = inputFormat.encoderDelay.coerceAtLeast(0)
         // Media3 trims encoder delay for 16-bit PCM only (TrimmingAudioProcessor).
-        pendingStartTrimFrames =
-            if (pcmFormat?.encoding == PcmEncoding.PCM_16BIT) inputFormat.encoderDelay.coerceAtLeast(0) else 0
+        pendingStartTrimFrames = if (pcmFormat?.encoding == PcmEncoding.PCM_16BIT) delayFrames else 0
+        val rate = pcmFormat?.sampleRate ?: inputFormat.sampleRate
+        formatDelayUs = if (rate > 0) delayFrames * 1_000_000L / rate else 0L
+        timelineTrimUs = if (rate > 0) pendingStartTrimFrames * 1_000_000L / rate else 0L
         input.onFormat(pcmFormat, if (pcmFormat == null) describeUnsupported(inputFormat) else null)
+        reportMediaTimeOffset()
+    }
+
+    override fun setOutputStreamOffsetUs(outputStreamOffsetUs: Long) {
+        super.setOutputStreamOffsetUs(outputStreamOffsetUs)
+        this.outputStreamOffsetUs = outputStreamOffsetUs
+        reportMediaTimeOffset()
+    }
+
+    /** `sink time − media time` for the current stream (see [timelineTrimUs]). */
+    private fun reportMediaTimeOffset() {
+        if (outputStreamOffsetUs == C.TIME_UNSET) return
+        input.onMediaTimeOffset(outputStreamOffsetUs + formatDelayUs - timelineTrimUs)
     }
 
     override fun handleBuffer(
@@ -90,8 +115,8 @@ class PcmTapAudioSink(
         val endFrame = (endPosition - trackedStartPosition) / frameBytes
         val firstPlayedFrame = maxOf(firstFrame, trackedTrimFrames)
         if (endFrame > firstPlayedFrame) {
-            val ptsUs = presentationTimeUs +
-                (firstPlayedFrame - trackedTrimFrames).toLong() * 1_000_000L / currentFormat.sampleRate
+            // Timestamp on the sink's own timeline (what its position reports when it is heard).
+            val ptsUs = presentationTimeUs + firstPlayedFrame.toLong() * 1_000_000L / currentFormat.sampleRate - timelineTrimUs
             input.onPcm(
                 buffer,
                 trackedStartPosition + firstPlayedFrame * frameBytes,
@@ -125,7 +150,10 @@ class PcmTapAudioSink(
         super.flush()
         trackedBuffer = null
         pendingStartTrimFrames = 0
+        // Seeks are not trimmed again: from now on buffer timestamps are the sink's timeline.
+        timelineTrimUs = 0L
         input.onDiscontinuity()
+        reportMediaTimeOffset()
     }
 
     override fun reset() {

@@ -140,10 +140,17 @@ private fun CapabilitiesCard(caps: DeviceCapabilities, predefined: String, calib
             InfoRow("Q factor", caps.qFactor?.let { "%.1f".format(it) } ?: "Not reported")
         }
         InfoRow(
-            "Rendering in use",
+            "Live rendering",
             caps.strategyFor(calibration.preferEnvelopeEffects, calibration.preferPrimitives).label,
             valueColor = HsColors.Accent,
         )
+        if (caps.hasVibrator) {
+            InfoRow(
+                "Prepared rendering",
+                if (caps.hasAmplitudeControl) "One waveform per ~1 s window, 5 ms steps" else "One on/off pattern per ~1 s window",
+                valueColor = HsColors.Accent,
+            )
+        }
     }
 }
 

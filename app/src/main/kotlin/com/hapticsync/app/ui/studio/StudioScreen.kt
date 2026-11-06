@@ -85,14 +85,13 @@ fun StudioScreen(
             contentPadding = padding.screenContent(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item { PresetHeader(presetName, profile, onSave = { saveDialog = true }, onIsolationOff = { viewModel.setIsolation(false, profile.isolation.target) }) }
+            item { PresetHeader(presetName, profile, onSave = { saveDialog = true }, onIsolationOff = { viewModel.setIsolation(profile.isolation.copy(enabled = false)) }) }
             item { FeelSection(profile.haptics, viewModel::updateHaptics) }
             item {
-                SectionCard("Sound isolation", subtitle = "Feel a single component of the soundtrack") {
+                SectionCard("Sound isolation", subtitle = "Feel only the sounds you pick, as many as you like") {
                     IsolationPicker(
-                        enabled = profile.isolation.enabled,
-                        target = profile.isolation.target,
-                        onChange = { enabled, target -> viewModel.setIsolation(enabled, target) },
+                        settings = profile.isolation,
+                        onChange = viewModel::setIsolation,
                         showHeader = false,
                     )
                 }
@@ -159,13 +158,13 @@ private fun PresetHeader(presetName: String, profile: HapticProfile, onSave: () 
                 style = MaterialTheme.typography.bodySmall,
                 color = HsColors.TextSecondary,
             )
-            if (profile.isolation.enabled) {
+            if (profile.isolation.isActive) {
                 Spacer(Modifier.height(10.dp))
                 Surface(shape = RoundedCornerShape(14.dp), color = HsColors.Accent.copy(alpha = 0.14f)) {
                     Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.CenterFocusStrong, contentDescription = null, tint = HsColors.Accent, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Isolation on: feeling only ${profile.isolation.target.label}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        Text("Isolation on: feeling only ${profile.isolation.summary(maxNames = 3)}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                         TextButton(onClick = onIsolationOff) { Text("Turn off") }
                     }
                 }

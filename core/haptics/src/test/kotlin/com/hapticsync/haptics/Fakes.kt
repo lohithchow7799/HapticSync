@@ -60,6 +60,7 @@ fun event(
 
 val LOW_SHARES = floatArrayOf(0.45f, 0.45f, 0.06f, 0.03f, 0.01f, 0f)
 val HIGH_SHARES = floatArrayOf(0f, 0.01f, 0.04f, 0.1f, 0.35f, 0.5f)
+val SUB_SHARES = floatArrayOf(0.7f, 0.2f, 0.06f, 0.03f, 0.01f, 0f)
 
 fun config(
     profile: HapticProfile = HapticProfile(),

@@ -49,4 +49,11 @@ interface MediaAudioInput {
 
     /** The sink was reset or released. All state derived from the current stream is void. */
     fun onReset()
+
+    /**
+     * The mapping between the sink's time base and the media item's own timeline changed:
+     * `sink time = media time + sinkMinusMediaUs`, where media time is the position on the
+     * item's timeline with the encoder delay removed (the time base of a prepared haptic track).
+     */
+    fun onMediaTimeOffset(sinkMinusMediaUs: Long) {}
 }

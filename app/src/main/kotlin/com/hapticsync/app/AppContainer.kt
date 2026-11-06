@@ -11,6 +11,7 @@ import com.hapticsync.engine.EngineThreadFactory
 import com.hapticsync.engine.HapticSyncEngine
 import com.hapticsync.model.BuiltInPresets
 import com.hapticsync.model.CalibrationProfile
+import com.hapticsync.platform.playback.MediaAudioDecoder
 import com.hapticsync.platform.playback.PlayableItem
 import com.hapticsync.platform.playback.PlayerState
 import com.hapticsync.platform.vibration.AndroidHapticOutput
@@ -88,6 +89,12 @@ class AppContainer(val application: Application) {
     )
 
     val settings = HapticSettingsController(scope, repository, engine, hapticOutput, deviceKey)
+
+    /** Decodes soundtracks ahead of playback for preparing haptics. */
+    val audioDecoder = MediaAudioDecoder(application)
+
+    /** Thread factory for engine and preparation threads (audio or background priority). */
+    val threadFactory: EngineThreadFactory = AUDIO_THREAD_FACTORY
     val mediaLibrary = MediaLibrary(application)
     val demoClips = DemoClipStore(application)
     val playbackQueue = PlaybackQueue()

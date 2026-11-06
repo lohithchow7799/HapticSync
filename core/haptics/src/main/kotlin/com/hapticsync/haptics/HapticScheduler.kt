@@ -106,6 +106,13 @@ class HapticScheduler(
         epoch
     }
 
+    /** Drops everything queued and stops output without starting a new epoch. */
+    fun clear() = synchronized(outputLock) {
+        synchronized(queueLock) { queue.clear() }
+        plan.clear()
+        stopLocked()
+    }
+
     /** Playback paused, buffering, ended or the app went to the background: stop at once. */
     fun playbackStopped() = synchronized(outputLock) { stopLocked() }
 

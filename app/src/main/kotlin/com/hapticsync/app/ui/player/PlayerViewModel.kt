@@ -10,7 +10,6 @@ import com.hapticsync.app.NowPlaying
 import com.hapticsync.app.PlaybackRequest
 import com.hapticsync.engine.EngineStatus
 import com.hapticsync.model.IsolationSettings
-import com.hapticsync.model.IsolationTarget
 import com.hapticsync.model.RecentMedia
 import com.hapticsync.platform.playback.HapticPlayer
 import com.hapticsync.platform.playback.PlayableItem
@@ -35,6 +34,10 @@ class PlayerViewModel(
 
     val engine = container.engine
     private val player = HapticPlayer(container.application, engine)
+    private val preparationController = HapticPreparationController(container, player)
+
+    /** Haptic preparation ("preparing haptics… then play"). */
+    val preparation: StateFlow<PreparationState> = preparationController.state
 
     override val state: StateFlow<PlayerState> = player.state
     val profile = container.settings.profile
@@ -70,6 +73,8 @@ class PlayerViewModel(
             var ticks = 0
             while (isActive) {
                 player.refresh()
+                preparationController.update()
+                engine.onPlayerPosition(player.exoPlayer.currentPosition * 1000L, System.nanoTime())
                 _status.value = engine.status
                 val tick = ticks++
                 trackRecents(savePosition = tick % 25 == 0)
@@ -85,7 +90,10 @@ class PlayerViewModel(
         lastRecordedUri = null
         saveRequest(request)
         player.setRepeat(request.repeat)
-        player.setItems(request.items, request.startIndex, request.startPositionMs, playWhenReady = request.autoPlay)
+        // Playback starts once the haptics are prepared (see HapticPreparationController).
+        player.setItems(request.items, request.startIndex, request.startPositionMs, playWhenReady = false)
+        preparationController.onOpen(autoPlay = request.autoPlay)
+        preparationController.update()
     }
 
     private fun trackRecents(savePosition: Boolean) {
@@ -160,11 +168,32 @@ class PlayerViewModel(
     /** The underlying player, for attaching a video surface. */
     fun exoPlayerForView(): androidx.media3.common.Player = player.exoPlayer
 
-    override fun togglePlayPause() = player.togglePlayPause()
-    fun play() = player.play()
-    fun pause() = player.pause()
-    fun seekTo(positionMs: Long) = player.seekTo(positionMs)
-    fun seekBy(deltaMs: Long) = player.seekBy(deltaMs)
+    override fun togglePlayPause() {
+        val s = state.value
+        when {
+            preparationController.isWaiting -> preparationController.playNow()
+            s.isPlaying || (s.playWhenReady && s.isBuffering) -> pause()
+            else -> player.play()
+        }
+    }
+
+    fun play() = if (preparationController.isWaiting) preparationController.playNow() else player.play()
+
+    /** Starts playback without waiting for haptic preparation to finish. */
+    fun playNow() = preparationController.playNow()
+
+    fun pause() {
+        player.pause()
+        preparationController.onUserPause()
+    }
+
+    fun seekTo(positionMs: Long) {
+        if (!state.value.seekable) return
+        player.seekTo(positionMs)
+        preparationController.onSeek(positionMs.coerceAtLeast(0L))
+    }
+
+    fun seekBy(deltaMs: Long) = seekTo(player.exoPlayer.currentPosition + deltaMs)
     fun next() = player.next()
     fun previous() = player.previous()
     fun setSpeed(speed: Float) = player.setSpeed(speed)
@@ -187,8 +216,8 @@ class PlayerViewModel(
 
     fun setMasterIntensity(value: Float) = container.settings.updateProfile { it.copy(haptics = it.haptics.copy(masterIntensity = value)) }
 
-    fun setIsolation(enabled: Boolean, target: IsolationTarget = profile.value.isolation.target) =
-        container.settings.updateProfileInPlace { it.copy(isolation = IsolationSettings(enabled, target)) }
+    fun setIsolation(isolation: IsolationSettings) =
+        container.settings.updateProfileInPlace { it.copy(isolation = isolation.validated()) }
 
     fun setSyncOffset(ms: Float) = container.settings.updateCalibration { it.copy(syncOffsetMs = ms) }
 
@@ -197,6 +226,7 @@ class PlayerViewModel(
     /** The app went to the background: pause so nothing plays or vibrates unseen. */
     override fun onBackgrounded() {
         player.pause()
+        preparationController.onBackgrounded()
         trackRecents(savePosition = true)
         savePosition()
     }
@@ -204,6 +234,7 @@ class PlayerViewModel(
     override fun onCleared() {
         trackRecents(savePosition = true)
         container.clearNowPlaying(this)
+        preparationController.release()
         player.release()
         container.releaseEngine()
     }

@@ -106,6 +106,7 @@ fun PlayerScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenStudio: (
     val settings by viewModel.settings.collectAsState()
     val profile by viewModel.profile.collectAsState()
     val status by viewModel.status.collectAsState()
+    val preparation by viewModel.preparation.collectAsState()
     val request by viewModel.request.collectAsState()
     val configuration = LocalConfiguration.current
     val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -184,8 +185,8 @@ fun PlayerScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenStudio: (
                     Text(state.title.ifEmpty { "Loading…" }, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     SeekBar(viewModel, state, interact)
                     BottomButtons(viewModel, state, fullscreen = false, onFullscreen = {}, interact, showTransport = true)
-                    HapticBar(viewModel, profile.haptics.masterIntensity, settings.hapticsEnabled, profile.isolation.enabled,
-                        profile.isolation.target.label, onIsolation = { showIsolation = true }, onOpenStudio = onOpenStudio)
+                    HapticBar(viewModel, profile.haptics.masterIntensity, settings.hapticsEnabled, profile.isolation.isActive,
+                        profile.isolation.summary(), modeText(preparation), onIsolation = { showIsolation = true }, onOpenStudio = onOpenStudio)
                     Banners(state, status.unsupportedReason, viewModel.capabilities.hasVibrator, Modifier)
                     if (request?.syncTest == true) SyncTestPanel(viewModel)
                 }
@@ -231,8 +232,8 @@ fun PlayerScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenStudio: (
                     Text(state.title.ifEmpty { "Loading…" }, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     SeekBar(viewModel, state, interact)
                     BottomButtons(viewModel, state, fullscreen = false, onFullscreen = { fullscreen = true }, interact, showTransport = audioOnly)
-                    HapticBar(viewModel, profile.haptics.masterIntensity, settings.hapticsEnabled, profile.isolation.enabled,
-                        profile.isolation.target.label, onIsolation = { showIsolation = true }, onOpenStudio = onOpenStudio)
+                    HapticBar(viewModel, profile.haptics.masterIntensity, settings.hapticsEnabled, profile.isolation.isActive,
+                        profile.isolation.summary(), modeText(preparation), onIsolation = { showIsolation = true }, onOpenStudio = onOpenStudio)
                 }
                 Banners(state, status.unsupportedReason, viewModel.capabilities.hasVibrator, Modifier.padding(horizontal = 18.dp))
                 if (settings.showVisualization && !audioOnly && !syncTest) {
@@ -252,14 +253,15 @@ fun PlayerScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onOpenStudio: (
         }
         if (state.error != null) {
             ErrorCard(state.error!!, Modifier.align(Alignment.Center).padding(24.dp)) { viewModel.play() }
+        } else if (preparation.waiting) {
+            PreparingCard(preparation.progress, Modifier.align(Alignment.Center).padding(24.dp), onPlayNow = viewModel::playNow)
         }
     }
 
     if (showIsolation) {
         IsolationSheet(
-            enabled = profile.isolation.enabled,
-            target = profile.isolation.target,
-            onChange = { enabled, target -> viewModel.setIsolation(enabled, target) },
+            settings = profile.isolation,
+            onChange = viewModel::setIsolation,
             onDismiss = { showIsolation = false },
         )
     }
@@ -333,7 +335,9 @@ private fun HapticToggle(enabled: Boolean, onToggle: () -> Unit) {
 private fun CenterControls(viewModel: PlayerViewModel, state: PlayerState, modifier: Modifier, interact: () -> Unit) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
         IconButton(onClick = { viewModel.previous(); interact() }) { Icon(Icons.Rounded.SkipPrevious, "Previous", tint = Color.White, modifier = Modifier.size(34.dp)) }
-        IconButton(onClick = { viewModel.seekBy(-10_000); interact() }) { Icon(Icons.Rounded.Replay10, "Back 10 seconds", tint = Color.White, modifier = Modifier.size(30.dp)) }
+        IconButton(onClick = { viewModel.seekBy(-10_000); interact() }, enabled = state.seekable) {
+            Icon(Icons.Rounded.Replay10, "Back 10 seconds", tint = if (state.seekable) Color.White else Color.White.copy(alpha = 0.3f), modifier = Modifier.size(30.dp))
+        }
         FilledIconButton(
             onClick = { viewModel.togglePlayPause(); interact() },
             modifier = Modifier.size(68.dp),
@@ -341,7 +345,9 @@ private fun CenterControls(viewModel: PlayerViewModel, state: PlayerState, modif
         ) {
             Icon(if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (state.isPlaying) "Pause" else "Play", modifier = Modifier.size(38.dp))
         }
-        IconButton(onClick = { viewModel.seekBy(10_000); interact() }) { Icon(Icons.Rounded.Forward10, "Forward 10 seconds", tint = Color.White, modifier = Modifier.size(30.dp)) }
+        IconButton(onClick = { viewModel.seekBy(10_000); interact() }, enabled = state.seekable) {
+            Icon(Icons.Rounded.Forward10, "Forward 10 seconds", tint = if (state.seekable) Color.White else Color.White.copy(alpha = 0.3f), modifier = Modifier.size(30.dp))
+        }
         IconButton(onClick = { viewModel.next(); interact() }, enabled = state.hasNext) {
             Icon(Icons.Rounded.SkipNext, "Next", tint = if (state.hasNext) Color.White else Color.White.copy(alpha = 0.3f), modifier = Modifier.size(34.dp))
         }
@@ -359,6 +365,7 @@ private fun SeekBar(viewModel: PlayerViewModel, state: PlayerState, interact: ()
             value = value,
             onValueChange = { dragging = true; dragValue = it; interact() },
             onValueChangeFinished = { viewModel.seekTo((dragValue * duration).toLong()); dragging = false },
+            enabled = state.seekable && state.durationMs > 0,
             colors = SliderDefaults.colors(thumbColor = HsColors.Accent, activeTrackColor = HsColors.Accent, inactiveTrackColor = Color.White.copy(alpha = 0.2f)),
         )
         Row(Modifier.fillMaxWidth()) {
@@ -430,6 +437,7 @@ private fun HapticBar(
     hapticsEnabled: Boolean,
     isolationEnabled: Boolean,
     isolationLabel: String,
+    modeText: String?,
     onIsolation: () -> Unit,
     onOpenStudio: () -> Unit,
 ) {
@@ -443,6 +451,9 @@ private fun HapticBar(
             }
             Slider(value = intensity, onValueChange = { viewModel.setMasterIntensity(it) }, enabled = hapticsEnabled,
                 colors = SliderDefaults.colors(inactiveTrackColor = HsColors.SurfaceHighest))
+            if (modeText != null) {
+                Text(modeText, style = MaterialTheme.typography.labelSmall, color = HsColors.TextMuted, modifier = Modifier.padding(bottom = 6.dp))
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     onClick = onIsolation,
@@ -496,6 +507,9 @@ private fun Banners(state: PlayerState, unsupportedReason: String?, hasVibrator:
         state.tracksKnown && !state.hasAudio -> "This video has no audio track, so there is nothing to feel."
         state.tracksKnown && !state.audioSupported -> "This video's audio format can't be decoded on this device, so haptics are unavailable."
         unsupportedReason != null -> unsupportedReason
+        state.tracksKnown && !state.seekable && state.playbackState != androidx.media3.common.Player.STATE_IDLE ->
+            "This file can't be seeked: its ${containerName(state.containerMimeType)} container has no seek index, so the timeline is locked. " +
+                "Saving it again as a regular MP4 makes it seekable."
         else -> null
     } ?: return
     Surface(modifier.fillMaxWidth().padding(vertical = 4.dp), shape = RoundedCornerShape(14.dp), color = HsColors.Danger.copy(alpha = 0.12f)) {
@@ -557,4 +571,48 @@ fun Context.findActivity(): Activity? {
         c = c.baseContext
     }
     return null
+}
+
+private fun containerName(mime: String?): String = when (mime) {
+    null -> "media"
+    "video/mp4", "audio/mp4" -> "MP4"
+    "video/webm", "audio/webm" -> "WebM"
+    "video/x-matroska", "audio/x-matroska" -> "Matroska"
+    "video/mp2t" -> "MPEG-TS"
+    else -> mime.substringAfter('/').uppercase()
+}
+
+/** One line under the intensity slider saying how haptics are produced. */
+private fun modeText(preparation: PreparationState): String? = when {
+    preparation.liveReason != null -> preparation.liveReason
+    preparation.prepared -> "Prepared haptics: analysed ahead, timed to the sound"
+    else -> null
+}
+
+/** Shown while playback waits for the soundtrack to be analysed. */
+@Composable
+private fun PreparingCard(progress: Float, modifier: Modifier, onPlayNow: () -> Unit) {
+    Surface(modifier, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f)) {
+        Column(Modifier.padding(20.dp).width(260.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Rounded.Vibration, contentDescription = null, tint = HsColors.Accent, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.height(8.dp))
+            Text("Preparing haptics", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Analysing the soundtrack first, so every vibration lands exactly with its sound.",
+                style = MaterialTheme.typography.bodySmall,
+                color = HsColors.TextSecondary,
+            )
+            Spacer(Modifier.height(12.dp))
+            androidx.compose.material3.LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+                color = HsColors.Accent,
+                trackColor = HsColors.SurfaceHighest,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = HsColors.TextMuted)
+            androidx.compose.material3.TextButton(onClick = onPlayNow) { Text("Play now") }
+        }
+    }
 }

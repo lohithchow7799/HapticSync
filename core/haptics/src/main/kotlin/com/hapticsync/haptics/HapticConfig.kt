@@ -38,12 +38,15 @@ class HapticConfig(profile: HapticProfile, calibration: CalibrationProfile) {
     val fatigueProtection = p.haptics.fatigueProtection
     val scaleWithSpeed = p.haptics.scaleWithSpeed
 
-    val isolationEnabled = p.isolation.enabled
-    val isolationCategories = BooleanArray(SoundCategory.COUNT) {
-        p.isolation.target.allowedCategories().contains(SoundCategory.entries[it])
-    }
-    val isolationBands = BooleanArray(BandId.COUNT) { p.isolation.target.allowedBands().contains(BandId.entries[it]) }
-    val bandIsolation = p.isBandIsolation
+    /** Isolation is on with at least one selected sound, category, band or group. */
+    val isolationEnabled = p.isolation.isActive
+    private val allowedCategories = p.isolation.allowedCategories
+    private val allowedBands = p.isolation.allowedBands
+    val isolationCategories = BooleanArray(SoundCategory.COUNT) { SoundCategory.entries[it] in allowedCategories }
+    val isolationBands = BooleanArray(BandId.COUNT) { BandId.entries[it] in allowedBands }
+
+    /** Isolation lets the energy of selected frequency bands through (alone or with categories). */
+    val bandIsolation = isolationEnabled && allowedBands.isNotEmpty()
 
     val outputGain = c.outputGain
     val amplitudeGamma = c.amplitudeGamma
@@ -59,11 +62,13 @@ class HapticConfig(profile: HapticProfile, calibration: CalibrationProfile) {
      */
     val fireOffsetUs: Long get() = syncOffsetUs - actuatorLatencyUs
 
-    /** Whether [category] may produce output under the enabled flags and isolation mode. */
+    /**
+     * Whether [category] may produce output under the enabled flags and isolation mode (as a
+     * category; selected bands are handled separately by the mapper).
+     */
     fun allows(category: SoundCategory): Boolean {
         if (!categoryEnabled[category.ordinal]) return false
         if (!isolationEnabled) return true
-        if (bandIsolation) return false
         return isolationCategories[category.ordinal]
     }
 

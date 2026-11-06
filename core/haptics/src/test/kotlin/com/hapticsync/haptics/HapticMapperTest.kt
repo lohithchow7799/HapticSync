@@ -84,6 +84,26 @@ class HapticMapperTest {
     }
 
     @Test
+    fun combinedIsolationFeelsEverySelectedSound() {
+        val selection = IsolationSettings(
+            enabled = true,
+            targets = listOf(
+                IsolationTarget.of(SoundCategory.GEAR_SHIFT),
+                IsolationTarget.of(SoundCategory.EXPLOSION),
+                IsolationTarget.of(BandId.SUB_BASS),
+            ),
+        )
+        val m = mapper(HapticProfile().copy(isolation = selection))
+        assertNotNull("selected category", m.mapEvent(event(SoundCategory.GEAR_SHIFT), 0))
+        assertNotNull("second selected category", m.mapEvent(event(SoundCategory.EXPLOSION), 0))
+        assertNotNull("other sounds carried by the selected band", m.mapEvent(event(SoundCategory.CYMBAL, shares = SUB_SHARES), 0))
+        assertNull("unselected and not in the band", m.mapEvent(event(SoundCategory.SNARE, shares = HIGH_SHARES), 0))
+        val out = PlanSample()
+        repeat(30) { m.mapFrame(frameWith(SoundCategory.ENGINE_REV, 1f, rpm = 0.8f), 0, out) }
+        assertTrue("unselected texture without sub-bass energy is silent", out.amplitude < 0.02f)
+    }
+
+    @Test
     fun intensityAndDurationSettingsScaleTheEffect() {
         val base = mapper().mapEvent(event(SoundCategory.IMPACT), 0)!!
         val quiet = HapticProfile().updateCategory(SoundCategory.IMPACT) { it.copy(intensity = 0.2f) }

@@ -52,6 +52,31 @@ class HapticMapper(config: HapticConfig, private val hopDurationMs: Float) {
         lastCategory = -1
     }
 
+    /** Continuous-layer state, so a prepared-track renderer can resume exactly at a hop boundary. */
+    class State {
+        internal var smoothed = 0f
+        internal var phase = 0.0
+        internal var fatigueAverage = 0f
+        internal var fatigueGain = 1f
+        internal var lastCategory = -1
+    }
+
+    fun saveState(out: State) {
+        out.smoothed = smoothed
+        out.phase = phase
+        out.fatigueAverage = fatigueAverage
+        out.fatigueGain = fatigueGain
+        out.lastCategory = lastCategory
+    }
+
+    fun restoreState(state: State) {
+        smoothed = state.smoothed
+        phase = state.phase
+        fatigueAverage = state.fatigueAverage
+        fatigueGain = state.fatigueGain
+        lastCategory = state.lastCategory
+    }
+
     /** Maps an event, or returns null when settings or isolation suppress it. */
     fun mapEvent(event: SoundEvent, epoch: Int): TransientEffect? {
         val c = config
@@ -59,7 +84,11 @@ class HapticMapper(config: HapticConfig, private val hopDurationMs: Float) {
         val category = event.category
         val template: TransientTemplate
         var amplitude: Float
-        if (c.isolationEnabled && c.bandIsolation) {
+        // With isolation, a sound passes as its category if that category is selected, else as a
+        // pulse of the selected bands if it is carried by them.
+        val asBandPulse = c.isolationEnabled && !c.allows(category)
+        if (asBandPulse) {
+            if (!c.bandIsolation) return null
             // Band isolation: any event carried by the isolated bands is felt as a band pulse.
             var isolatedShare = 0f
             var pulse = 0f
@@ -178,7 +207,7 @@ class HapticMapper(config: HapticConfig, private val hopDurationMs: Float) {
         val rpm = frame.rpmNormalized
 
         if (c.continuousLayer) {
-            if (c.isolationEnabled && c.bandIsolation) {
+            if (c.bandIsolation) {
                 for (b in 0 until BandId.COUNT) {
                     if (!c.isolationBands[b]) continue
                     val a = frame.bandLevel[b] * c.bandIntensity[b] * 0.6f * c.continuousGain
@@ -189,7 +218,9 @@ class HapticMapper(config: HapticConfig, private val hopDurationMs: Float) {
                         sharpness = 0.1f + 0.15f * b
                     }
                 }
-            } else {
+            }
+            // Category textures (with isolation, only the selected categories pass `allows`).
+            run {
                 val bandWeight = bandIntensityWeight(frame)
                 for (category in TextureTemplate.CONTINUOUS_CATEGORIES) {
                     val level = frame.continuous[category.ordinal]
