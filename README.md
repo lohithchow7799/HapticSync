@@ -308,8 +308,9 @@ usage class in Calibration.
   example). The engine exposes a `SemanticClassifier` hook through which an on-device audio
   model (e.g. a YAMNet-style AudioSet classifier run with LiteRT/TensorFlow Lite) can nudge
   these decisions; `SemanticLabelMap` already maps AudioSet labels to HapticSync categories.
-  No ML runtime or model is bundled: the app ships no native code (so it meets Google Play's
-  16 KB page-size requirement without extra work) and works fully without one. To add one,
+  No ML runtime or model is bundled, and the app works fully without one. (The only native
+  code in the APK is two small AndroidX libraries, from Compose and DataStore; both are 16 KB
+  page-aligned, as Google Play requires.) To add one,
   implement `SemanticClassifier` and assign it to `HapticSyncEngine.semanticClassifier`; the
   engine runs it off the audio threads about twice per second.
 - **A vibration motor is not a speaker.** Phone actuators resonate around 150–250 Hz and cannot
