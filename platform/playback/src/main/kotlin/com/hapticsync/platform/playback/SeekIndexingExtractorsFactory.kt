@@ -24,7 +24,7 @@ import java.nio.ByteBuffer
  *
  * ExoPlayer treats a file as unseekable when seeking would need an index the container does
  * not carry. Seeking then silently restarts playback from the beginning. This factory:
- * - enables constant-bitrate seeking (MPEG-TS, MP3, ADTS AAC, AMR without an index), and
+ * - enables constant-bitrate seeking (MP3, ADTS AAC and AMR without an index), and
  * - builds the missing index for fragmented MP4 without `sidx` and Matroska/WebM without `Cues`
  *   by scanning the file's fragment/cluster headers once (a few milliseconds per minute of
  *   media), and hands the player a real seek map.

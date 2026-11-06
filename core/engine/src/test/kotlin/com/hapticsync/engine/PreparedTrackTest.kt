@@ -42,7 +42,7 @@ internal fun buildTrack(
 ): Pair<HapticTrack, HapticTrackBuilder> {
     val totalFrames = interleaved.size / channels
     track.durationUs = totalFrames * 1_000_000L / sampleRate
-    val builder = HapticTrackBuilder(track, profile)
+    val builder = HapticTrackBuilder(track, profile, decodeStartUs = (fromSec * 1e6).toLong())
     builder.configure(PcmFormat(sampleRate, channels, PcmEncoding.PCM_16BIT))
     var frame = (fromSec * sampleRate).toInt()
     val end = minOf(totalFrames, (toSec.coerceAtMost(1e9) * sampleRate).toInt())
@@ -128,6 +128,47 @@ class PreparedTrackBuilderTest {
         assertTrue("kicks kept $kept/${kickTimes.size}", kept >= kickTimes.size - 1)
         val clutter = clickTimes.count { c -> events.any { abs(it.timeUs - (c * 1e6).toLong()) <= 20_000 } }
         assertEquals("quiet clicks felt", 0, clutter)
+    }
+
+    @Test
+    fun audioThatStartsLateIsReadyFromZero() {
+        // Screen recordings often start their audio a little after the video.
+        val rate = 44_100
+        val clip = DemoClips.render(DemoScenario.DRUM_GROOVE, rate).interleaved()
+        val track = HapticTrack()
+        val builder = HapticTrackBuilder(track, BuiltInPresets.MUSIC.profile, decodeStartUs = 0L)
+        builder.configure(PcmFormat(rate, 2, PcmEncoding.PCM_16BIT))
+        val offsetUs = 400_000L
+        var frame = 0
+        val total = clip.size / 2
+        while (frame < total) {
+            val n = minOf(1024, total - frame)
+            val buffer = ByteBuffer.allocate(n * 4).order(ByteOrder.LITTLE_ENDIAN)
+            for (i in 0 until n * 2) buffer.putShort((clip[frame * 2 + i].coerceIn(-1f, 1f) * 32767f).roundToInt().toShort())
+            buffer.flip()
+            builder.write(buffer, 0, buffer.limit(), offsetUs + frame * 1_000_000L / rate)
+            frame += n
+        }
+        builder.finish(endOfStream = true)
+        assertTrue("the silent start is not ready", track.isReady(0L, 5_000_000L))
+        assertTrue(track.isFullyPrepared)
+        val out = com.hapticsync.analysis.AnalysisFrame()
+        assertTrue(track.readFrame(100_000L, out))
+        assertTrue("the silent start is not silent", out.bandLevel.all { it == 0f } && out.timeUs + out.durationUs == offsetUs)
+    }
+
+    @Test
+    fun theEndOfTheAudioCountsAsReadyEvenIfTheVideoIsLonger() {
+        val clip = DemoClips.render(DemoScenario.EXPLOSIONS, 44_100)
+        val (track, _) = buildTrack(clip.interleaved(), clip.sampleRate)
+        val audioEnd = track.durationUs
+        // The player's duration: a video track 2 s longer (or a duration with the encoder delay).
+        track.durationUs = audioEnd + 2_000_000L
+        assertTrue(track.complete)
+        assertTrue(track.audioEndUs <= audioEnd && track.audioEndUs > audioEnd - 25_000L)
+        assertTrue("the last second is not ready", track.isReady(audioEnd - 1_000_000L, track.durationUs))
+        assertTrue("after the audio is not ready", track.isReady(audioEnd + 500_000L, track.durationUs))
+        assertTrue(track.isFullyPrepared)
     }
 
     @Test

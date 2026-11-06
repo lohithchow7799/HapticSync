@@ -63,7 +63,7 @@ class HapticTrackPreparer(
      */
     fun ensure(positionUs: Long, force: Boolean = false) {
         if (closed) return
-        if (!force && track.readyEndFrom(positionUs) != null) return
+        if (!force && track.isReady(positionUs, positionUs)) return
         synchronized(lock) {
             if (!force && jobCovers(positionUs)) return
             request = positionUs.coerceAtLeast(0L)
@@ -76,8 +76,12 @@ class HapticTrackPreparer(
     @Volatile private var jobStartUs = Long.MAX_VALUE
     @Volatile private var jobFrontierUs = Long.MIN_VALUE
 
-    private fun jobCovers(positionUs: Long): Boolean =
-        positionUs >= jobStartUs + HapticTrackBuilder.WARM_UP_US && positionUs <= jobFrontierUs + JOB_REACH_US
+    private fun jobCovers(positionUs: Long): Boolean {
+        val start = jobStartUs
+        val frontier = jobFrontierUs
+        if (start == Long.MAX_VALUE || frontier == Long.MIN_VALUE) return false
+        return positionUs >= start + HapticTrackBuilder.WARM_UP_US && positionUs <= frontier + JOB_REACH_US
+    }
 
     override fun close() {
         closed = true
@@ -114,14 +118,15 @@ class HapticTrackPreparer(
             // Skip what is ready; continue right after it.
             val readyEnd = track.readyEndFrom(position)
             if (readyEnd != null) {
-                if (track.complete && readyEnd >= track.durationUs - END_TOLERANCE_US) {
-                    if (track.isReady(0, track.durationUs)) _status.value = Status.Complete
+                if (track.isAudioEnd(readyEnd)) {
+                    if (track.isFullyPrepared) _status.value = Status.Complete
                     return
                 }
                 position = readyEnd
             }
             val startUs = if (position <= HapticTrackBuilder.WARM_UP_US) 0L else position - HapticTrackBuilder.WARM_UP_US
-            val builder = HapticTrackBuilder(track, profile)
+            if (track.isAudioEnd(position)) return
+            val builder = HapticTrackBuilder(track, profile, decodeStartUs = startUs)
             jobStartUs = startUs
             jobFrontierUs = startUs
             val result = decoder.decode(
@@ -142,7 +147,7 @@ class HapticTrackPreparer(
             when {
                 builder.reachedAnalysedRange -> position = builder.analysedUntilUs
                 result.endOfStream -> {
-                    if (track.isReady(0, track.durationUs)) _status.value = Status.Complete
+                    if (track.isFullyPrepared) _status.value = Status.Complete
                     return
                 }
                 else -> return
@@ -151,7 +156,10 @@ class HapticTrackPreparer(
     }
 
     private fun throttle(builder: HapticTrackBuilder) {
-        while (!closed && !restartRequested && builder.analysedUntilUs - playbackPositionUs > MAX_LEAD_US) {
+        while (!closed && !restartRequested) {
+            // Long.MIN_VALUE until the first audio is analysed (the difference would overflow).
+            val analysedUs = builder.analysedUntilUs
+            if (analysedUs == Long.MIN_VALUE || analysedUs - playbackPositionUs <= MAX_LEAD_US) return
             Thread.sleep(THROTTLE_SLEEP_MS)
         }
     }
@@ -162,7 +170,6 @@ class HapticTrackPreparer(
 
         /** A running job "covers" positions up to this far beyond its frontier (it gets there soon). */
         private const val JOB_REACH_US = 10_000_000L
-        private const val END_TOLERANCE_US = 25_000L
         private const val THROTTLE_SLEEP_MS = 200L
     }
 }

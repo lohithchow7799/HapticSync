@@ -62,18 +62,40 @@ class HapticTrack {
     private val lock = Any()
     private val segments = ArrayList<Segment>()
 
-    /** Set when analysis has reached the end of the item. */
-    @Volatile var complete: Boolean = false
-        internal set
+    /**
+     * Media time at which the audio ends, once analysis has reached it (Long.MAX_VALUE until
+     * then). It can be earlier than the item's duration (a video track that runs longer, or a
+     * duration that includes the encoder delay).
+     */
+    @Volatile var audioEndUs: Long = Long.MAX_VALUE
+        private set
+
+    /** Analysis has reached the end of the audio. */
+    val complete: Boolean get() = audioEndUs != Long.MAX_VALUE
+
+    /** Records that the audio ends at [timeUs]. */
+    internal fun markEndOfAudio(timeUs: Long) {
+        audioEndUs = minOf(audioEndUs, timeUs.coerceAtLeast(0L))
+    }
+
+    /** Whether [timeUs] is at (or after) the end of the audio: nothing there to prepare. */
+    fun isAudioEnd(timeUs: Long): Boolean {
+        val end = audioEndUs
+        return end != Long.MAX_VALUE && timeUs >= end - END_TOLERANCE_US
+    }
 
     /** Duration of the item, when known (for progress). */
     @Volatile var durationUs: Long = 0L
 
     val hopUs: Long get() = synchronized(lock) { segments.firstOrNull()?.let { it.hopFrames * 1_000_000L / it.sampleRate } ?: 10_000L }
 
-    /** Starts a new segment at [startUs] (media time of its first hop). */
-    internal fun startSegment(startUs: Long, hopFrames: Int, sampleRate: Int, warmUpUs: Long): Segment = synchronized(lock) {
-        val segment = Segment(startUs, hopFrames, sampleRate, startUs + warmUpUs)
+    /**
+     * Starts a new segment at [startUs] (media time of its first hop) whose reliable range begins
+     * at [readyFromUs]: after a warm-up, or at 0 for audio that starts the item (any time before
+     * the first hop has no audio and reads as silence).
+     */
+    internal fun startSegment(startUs: Long, hopFrames: Int, sampleRate: Int, readyFromUs: Long): Segment = synchronized(lock) {
+        val segment = Segment(startUs, hopFrames, sampleRate, readyFromUs)
         segments += segment
         segments.sortBy { it.startUs }
         segment
@@ -127,12 +149,18 @@ class HapticTrack {
         end
     }
 
-    /** Whether everything in [fromUs, toUs) is ready (the end of a complete item counts). */
+    /**
+     * Whether everything in [fromUs, toUs) is ready. The end of the audio counts as ready (its
+     * last partial hop is never analysed), and so does anything after it.
+     */
     fun isReady(fromUs: Long, toUs: Long): Boolean {
+        if (isAudioEnd(fromUs)) return true
         val end = readyEndFrom(fromUs) ?: return false
-        // The last partial hop of a complete item is never analysed.
-        return end >= toUs || (complete && end >= durationUs - END_TOLERANCE_US)
+        return end >= toUs || isAudioEnd(end)
     }
+
+    /** The whole audio is prepared. */
+    val isFullyPrepared: Boolean get() = complete && isReady(0L, Long.MAX_VALUE)
 
     /** Total ready media time, for progress display. */
     val readyDurationUs: Long get() = synchronized(lock) { segments.sumOf { (it.readyEndUs - it.readyStartUs).coerceAtLeast(0L) } }
@@ -146,6 +174,18 @@ class HapticTrack {
      */
     fun readFrame(timeUs: Long, out: AnalysisFrame): Boolean = synchronized(lock) {
         val segment = readySegmentAt(timeUs) ?: return false
+        if (timeUs < segment.startUs || segment.hops == 0) {
+            // Before the first audio of the item: silence.
+            out.timeUs = timeUs
+            out.durationUs = if (timeUs < segment.startUs) segment.startUs - timeUs else segment.hopTimeUs(1) - segment.startUs
+            out.rmsDb = dequantiseDb(0)
+            out.rpmNormalized = 0f
+            out.speechLikelihood = 0f
+            out.bandLevel.fill(0f)
+            out.bandShare.fill(0f)
+            out.continuous.fill(0f)
+            return@synchronized true
+        }
         val index = segment.hopIndexAt(timeUs).coerceIn(0, segment.hops - 1)
         val (chunk, base) = segment.offsetOf(index)
         var o = base

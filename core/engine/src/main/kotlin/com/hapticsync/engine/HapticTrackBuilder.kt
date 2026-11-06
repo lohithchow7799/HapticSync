@@ -60,7 +60,10 @@ data class DetectionSettings(
 class HapticTrackBuilder(
     val track: HapticTrack,
     profile: HapticProfile,
+    /** Media time where decoding starts (0: the start of the item). */
+    private val decodeStartUs: Long,
 ) {
+    private var startedSegments = 0
     private val profile: HapticProfile = profile.validated().let {
         it.copy(analysis = it.analysis.copy(quality = AnalysisQuality.HIGH))
     }
@@ -124,8 +127,12 @@ class HapticTrackBuilder(
         if (current == null || abs(ptsUs - expectedTimeUs(current)) > RESYNC_US) {
             // First audio, or a timestamp jump: (re)start a segment at this position.
             if (current != null) closeSegment()
-            val warmUp = if (ptsUs <= START_OF_STREAM_US) 0L else WARM_UP_US
-            current = track.startSegment(ptsUs, hopFrames, f.sampleRate, warmUp)
+            // Audio that starts the item is reliable from 0 (even if it begins a little later,
+            // e.g. in screen recordings); elsewhere the analysis needs a warm-up first.
+            val startOfItem = ptsUs <= START_OF_STREAM_US || (startedSegments == 0 && decodeStartUs <= 0L)
+            val readyFrom = if (startOfItem) 0L else ptsUs + WARM_UP_US
+            current = track.startSegment(ptsUs, hopFrames, f.sampleRate, readyFrom)
+            startedSegments++
             segment = current
             hopIndex = 0
             lastPublishedHop = 0
@@ -165,8 +172,10 @@ class HapticTrackBuilder(
 
     /** End of the audio (or of this preparation): publishes everything analysed. */
     fun finish(endOfStream: Boolean) {
-        segment?.let { publish(it, final = true) }
-        if (endOfStream) track.complete = true
+        val current = segment
+        current?.let { publish(it, final = true) }
+        // No audio at all from the decode start: the audio ends before it.
+        if (endOfStream) track.markEndOfAudio(current?.analysedEndUs ?: decodeStartUs)
     }
 
     private fun expectedTimeUs(segment: HapticTrack.Segment): Long {

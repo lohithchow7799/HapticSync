@@ -17,8 +17,18 @@ other apps' audio. The only permission it asks for is vibration.
   Access Framework. You can also use *Open with HapticSync* from a file manager. Several files
   can be picked at once and play as a playlist.
 - Play/pause, seek, ±10 s, previous/next, speed 0.5–2×, volume and mute.
+- Seeking also works in files whose container has no seek index: fragmented MP4 (screen
+  recordings, some downloads and camera apps) and Matroska/WebM without cues. ExoPlayer
+  normally restarts such files from the beginning on every seek; HapticSync builds the missing
+  index when the file opens. When a file really cannot be seeked (a live stream, for example),
+  the timeline is locked and says why.
 - Full-screen and rotation without interrupting playback.
 - Recently played list with thumbnails, resume position and progress.
+- **Prepare, then play** (on by default): the soundtrack is analysed ahead of playback, and
+  playback waits until the first 15 seconds are ready. On a recent phone this takes a few
+  seconds at most. After a seek
+  into audio that is not prepared yet, playback pauses briefly while it is prepared. A progress
+  card shows what is happening, and *Play now* skips the wait.
 - Haptics start and stop with playback and resynchronise after every seek. Nothing vibrates
   after pause, stop, the end of the video or leaving the app.
 - Live visualisation of the analysis:
@@ -86,8 +96,9 @@ other apps' audio. The only permission it asks for is vibration.
   *Feel it* test button.
 - Analysis settings: frequency range, window, hop, decision time, loudness adaptation, noise
   gate and quality.
-- **Isolation mode** lets you feel only one component: a category (e.g. gear shifts), a band
-  (e.g. sub-bass) or a group (engine, drums, sudden impacts, low-frequency sounds).
+- **Isolation mode** lets you feel only the sounds you choose. Select any number of categories
+  (e.g. gear shifts and bass drums), bands (e.g. sub-bass) and groups (engine, drums, sudden
+  impacts, low-frequency sounds) in any combination.
 
 **Calibration**
 - Capability report covering:
@@ -105,6 +116,8 @@ other apps' audio. The only permission it asks for is vibration.
 - Motor latency compensation, a sync offset (negative = earlier) and a **sync test**: a looping
   click track with a flash, so you can line up sound, picture and vibration.
 - Rendering preferences and the vibration usage class (media, physical emulation or touch).
+- Calibration shows the timing of both rendering paths: live dispatch error and the hand-over
+  error of prepared windows.
 - Calibration is saved per device model.
 
 **Presets**
@@ -133,6 +146,55 @@ other apps' audio. The only permission it asks for is vibration.
 ---
 
 ## How it works
+
+HapticSync has two ways of turning sound into vibration. **Prepared haptics** is the default;
+**live analysis** is used when preparing is turned off in Settings or the audio cannot be
+decoded ahead of playback.
+
+### Prepared haptics (default)
+
+```
+                ┌─► MediaAudioDecoder (Media3 extractors + MediaCodec, ahead of playback)
+ media file ────┤        │ PCM on the media timeline
+                │        ▼
+                │   HapticTrackBuilder: full analysis · salience filter · masking · density cap
+                │        │ events + texture levels, 10 ms resolution
+                │        ▼
+                │   HapticTrack (prepared range grows far ahead of playback)
+                │        │
+                │        ▼
+                │   TrackPlayer: renders the next 0.5–1.5 s as one amplitude waveform ──► Vibrator
+                │        ▲ media clock (sink position ↔ media time)
+                └─► ExoPlayer ──► PcmTapAudioSink ──► AudioTrack ──► speaker
+```
+
+1. **Decode ahead.** `MediaAudioDecoder` decodes the soundtrack with the player's own extractors,
+   so every sample has exactly the timestamp ExoPlayer plays it at. It starts at the playback
+   position and runs ahead of it.
+2. **Analyse with hindsight.** The same analyser as the live path runs over the audio, but the
+   builder can look 4 s into the future before it keeps an event:
+   - **salience:** an event far quieter than the programme around it (8–22 dB below it,
+     depending on event sensitivity) is background clutter and is dropped; unclassified
+     "general" sounds must be clearly prominent;
+   - **masking:** a weaker hit within 120 ms of a much stronger one is dropped;
+   - **density cap:** at most 12 events in any second.
+
+   This removes most of the "irrelevant" vibrations that live analysis has to guess about.
+3. **Store.** Events and texture levels go into a `HapticTrack`. Only *detection* settings
+   (bands, sensitivities, analysis) are baked in. Changing them re-prepares in the background
+   from the current position and switches over once ready. Output settings (intensity, envelope,
+   isolation, calibration) are applied at playback time, so they take effect at once.
+4. **Play.** `TrackPlayer` renders the next 0.5–1.5 s of the track at once (transients and
+   texture mixed on a 5 ms grid), calibrates it and issues it as a single amplitude waveform.
+   Each window starts at `content time + sync offset − motor latency` on the media clock, and
+   the next window is issued exactly when the previous one ends, at the quietest moment
+   available, so the hand-over cannot be felt. The motor gets about one command per second
+   instead of one per event, and each transient lands exactly where the analysis put it.
+5. **Timeline.** `PcmTapAudioSink` reports how the sink's clock maps to media time
+   (`sink time = media time + offset`), including the encoder delay that Media3 trims at the
+   start of a stream but not after a seek. Without this, AAC haptics ran about 45 ms late.
+
+### Live analysis
 
 ```
  ExoPlayer ──► audio decoder ──► PcmTapAudioSink ──┬──► AudioTrack ──► speaker   (audio unchanged)
@@ -164,6 +226,12 @@ other apps' audio. The only permission it asks for is vibration.
 5. **Rendering.** Effects are device-independent curves until the last step, where
    `HapticRenderer` encodes them for what the phone supports.
 
+### About Apple's music haptics
+
+Apple has not published the algorithm behind Music Haptics, so HapticSync does not copy it. It
+follows the same publicly described idea: a haptic track with transient and continuous
+intensity, computed from the audio before it is played and then played in sync with it.
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the threading model, timing and
 classification details.
 
@@ -175,8 +243,8 @@ classification details.
 | `core:model` | Bands, categories, haptic parameters, isolation, analysis settings, presets, calibration and app settings (serialisable) |
 | `core:analysis` | Feature extraction, onset detection, engine/rhythm/speech/thunder/texture detectors, event classifier, semantic-classifier hook |
 | `core:haptics` | Capability model, audio-to-haptic mapper, renderer strategies, timestamp scheduler, calibration patterns |
-| `core:engine` | Real-time orchestration: PCM ingest, analysis and scheduler threads, playback clock, visualisation buffers |
-| `platform:playback` | Media3 ExoPlayer integration and the PCM tap |
+| `core:engine` | Real-time orchestration: PCM ingest, analysis and scheduler threads, playback clock, visualisation buffers, prepared haptic tracks (builder, store, windowed player) |
+| `platform:playback` | Media3 ExoPlayer integration, the PCM tap, the ahead-of-playback decoder and track preparer, and seek indexing for unindexed containers |
 | `platform:vibration` | `Vibrator`/`VibratorManager` backend and capability probe |
 | `app` | Jetpack Compose UI (Material 3), view models, DataStore persistence, navigation |
 
@@ -286,6 +354,13 @@ The emulator job (instrumented tests) runs when the workflow is started manually
    - *Isolate a sound*, to feel only the engine or only the sub-bass;
    - *Haptic Studio*. Playback continues while you tune, so you feel each change immediately.
 
+**Phones with strong linear motors** (Galaxy S25 Ultra and similar flagships): these motors
+start and stop quickly and follow amplitude closely, which suits prepared haptics well. Quiet
+background texture below a small threshold is not sent to the motor, and texture is ducked
+under transients, so only meaningful sounds are felt. Prepared windows are issued as amplitude
+waveforms on a 5 ms grid. If clicks still feel late in the synchronisation test, increase
+*Motor latency* in Calibration a few milliseconds at a time.
+
 **If vibration feels weak or absent:** Android applies its own settings on top of the app.
 Check that *media vibration* is on (Settings › Sound & vibration › Vibration & haptics). Some
 phones also reduce vibration in battery-saver mode. As an alternative, try the *Touch feedback*
@@ -293,9 +368,12 @@ usage class in Calibration.
 
 ## Limitations
 
-- **Not validated on physical phones in this build.** All Android code is compiled, linted and
-  tested on CI. The analysis and haptic pipeline is verified end to end on the JVM with
-  synthesised scenes:
+- **Limited testing on physical phones.** All Android code is compiled, linted and tested on CI,
+  including emulator tests that check that the ahead-of-playback decoder and the playing sink
+  agree on the timeline within 3 ms (before and after seeks) and that fragmented MP4 without an
+  index can be seeked. The fixes in this version follow a test report from a Galaxy S25 Ultra
+  but have not been re-checked on that phone. The analysis and haptic pipeline is verified end
+  to end on the JVM with synthesised scenes:
   - gear shifts within about 40 ms;
   - drum hits with under 2 ms mean dispatch error;
   - sync clicks within ±4 ms at 16–96 kHz.
@@ -320,6 +398,12 @@ usage class in Calibration.
   never sees decoded PCM. In that case it shows a notice and plays without haptics. Headphones
   and Bluetooth work normally.
 - **No background playback.** By design, playback and vibration stop when you leave the app.
+- **Preparing needs a readable file.** Files from the pickers and file managers work. If the
+  audio cannot be decoded ahead of playback (an unusual codec, for example), haptics fall back
+  to live analysis and the player says so.
+- **Seek indexing covers fragmented MP4 and Matroska/WebM.** Other files without an index are
+  seeked by constant bitrate where possible. Anything else is played without seeking, and the
+  player says so.
 - **Local media only.** DRM-protected streaming is out of scope.
 
 ## Privacy

@@ -11,6 +11,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.MediaExtractorCompat
+import androidx.media3.extractor.ExtractorsFactory
 import com.hapticsync.dsp.PcmEncoding
 import com.hapticsync.dsp.PcmFormat
 import java.io.IOException
@@ -51,8 +52,10 @@ class MediaAudioDecoder(private val context: Context) {
         onFormat: (PcmFormat) -> Unit,
         onPcm: (ByteBuffer, Int, Int, Long) -> Boolean,
     ): Result {
-        // The player's own extractors (incl. seek indexing), so timestamps match exactly.
-        val extractor = MediaExtractorCompat(SeekIndexingExtractorsFactory(context), DefaultDataSource.Factory(context))
+        // The player's own extractors (incl. seek indexing), so timestamps match exactly. The
+        // indexing needs the URI, which MediaExtractorCompat does not always pass on.
+        val extractors = SeekIndexingExtractorsFactory(context)
+        val extractor = MediaExtractorCompat(ExtractorsFactory { extractors.createExtractors(uri, emptyMap()) }, DefaultDataSource.Factory(context))
         var codec: MediaCodec? = null
         try {
             try {
@@ -71,7 +74,7 @@ class MediaAudioDecoder(private val context: Context) {
             // The delay is removed here, exactly like the player's sink does, not by the decoder.
             format.removeKey(KEY_ENCODER_DELAY)
             format.removeKey(KEY_ENCODER_PADDING)
-            if (startUs > 0) extractor.seekTo(startUs, MediaExtractorCompat.SEEK_TO_PREVIOUS_SYNC)
+            if (startUs > 0) seek(extractor, startUs)
 
             if (mime == MimeTypes.AUDIO_RAW) {
                 return decodeRaw(extractor, format, durationUs, delayFrames, shouldStop, onFormat, onPcm)
@@ -145,6 +148,22 @@ class MediaAudioDecoder(private val context: Context) {
         }
     }
 
+    /**
+     * Positions [extractor] at or shortly before [startUs]. Fragmented files announce their seek
+     * index only once the first fragment is read, so a seek is retried after that; a file that
+     * still cannot be seeked is skipped through sample by sample (reading, not decoding).
+     */
+    private fun seek(extractor: MediaExtractorCompat, startUs: Long) {
+        extractor.seekTo(startUs, MediaExtractorCompat.SEEK_TO_PREVIOUS_SYNC)
+        if (!isFarBefore(extractor.sampleTime, startUs)) return
+        extractor.seekTo(startUs, MediaExtractorCompat.SEEK_TO_PREVIOUS_SYNC)
+        while (isFarBefore(extractor.sampleTime, startUs)) {
+            if (!extractor.advance()) break
+        }
+    }
+
+    private fun isFarBefore(sampleTimeUs: Long, targetUs: Long) = sampleTimeUs >= 0 && sampleTimeUs < targetUs - SEEK_SLACK_US
+
     /** Raw PCM (WAV and similar): samples come straight from the extractor. */
     private fun decodeRaw(
         extractor: MediaExtractorCompat,
@@ -209,6 +228,9 @@ class MediaAudioDecoder(private val context: Context) {
     private companion object {
         const val TIMEOUT_US = 10_000L
         const val RAW_BUFFER_BYTES = 64 * 1024
+
+        /** Samples this far before a seek target are skipped rather than decoded. */
+        const val SEEK_SLACK_US = 200_000L
 
         // MediaFormat.KEY_ENCODER_DELAY / KEY_ENCODER_PADDING (string values; the constants are API 30).
         const val KEY_ENCODER_DELAY = "encoder-delay"

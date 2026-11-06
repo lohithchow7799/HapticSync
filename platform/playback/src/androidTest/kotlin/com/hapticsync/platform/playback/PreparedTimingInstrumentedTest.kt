@@ -16,7 +16,10 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.hapticsync.dsp.PcmEncoding
 import com.hapticsync.dsp.PcmFormat
 import com.hapticsync.dsp.synth.WavWriter
+import com.hapticsync.engine.EngineThreadFactory
+import com.hapticsync.engine.HapticTrack
 import com.hapticsync.engine.MediaAudioInput
+import com.hapticsync.model.BuiltInPresets
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -103,6 +106,37 @@ class PreparedTimingInstrumentedTest {
             expectedUs = frames * 1_000_000L / RATE
         }
         assertEquals(RATE * 2L, frames)
+    }
+
+    @Test
+    fun preparerStartsAnywhereAndFillsGapsAfterASeek() {
+        val encoded = AacTestMedia.encode(AacTestMedia.clicks(RATE, 6.0, listOf(1.0, 2.5, 4.0, 5.0)), RATE)
+        val file = newFile("prepare.m4a").also { AacTestMedia.writeMp4WithDelay(it, encoded, ENCODER_DELAY) }
+        val preparer = HapticTrackPreparer(
+            MediaAudioDecoder(context),
+            Uri.fromFile(file),
+            HapticTrack(),
+            BuiltInPresets.CINEMATIC.profile,
+            EngineThreadFactory { name, _, body -> Thread(body, name).apply { isDaemon = true } },
+        )
+        try {
+            // Opening at a resume position: preparation starts there, not at 0.
+            preparer.playbackPositionUs = 3_000_000L
+            preparer.start(3_000_000L)
+            assertTrue("not prepared from the start position", waitUntil(15_000) { preparer.track.isReady(3_000_000L, 5_000_000L) })
+            assertFalse("prepared audio before the start position", preparer.track.isReady(0L, 1_000_000L))
+
+            // Seek back to the beginning: the gap is prepared and joins the existing range.
+            preparer.playbackPositionUs = 0L
+            preparer.ensure(0L)
+            assertTrue(
+                "the whole item was not prepared after seeking back (${preparer.status.value})",
+                waitUntil(15_000) { preparer.status.value == HapticTrackPreparer.Status.Complete },
+            )
+            assertTrue(preparer.track.isReady(0L, preparer.track.durationUs))
+        } finally {
+            preparer.close()
+        }
     }
 
     @Test

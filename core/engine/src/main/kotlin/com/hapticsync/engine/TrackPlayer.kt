@@ -140,7 +140,8 @@ internal class TrackPlayer(
         val continuation = !restart
         val from = if (continuation) max(windowEndUs, contentNow) else contentNow
         val readyEnd = t.readyEndFrom(from)
-        if (readyEnd == null || readyEnd - from < MIN_READY_US) {
+        // Less than MIN_READY_US ahead is enough when it is the end of the audio.
+        if (readyEnd == null || (readyEnd - from < MIN_READY_US && !t.isAudioEnd(readyEnd))) {
             stats.notReady++
             if (vibrating || windowEndUs != NONE) stop()
             return NOT_READY_WAIT_NANOS
